@@ -1,0 +1,503 @@
+# mbd-studio-sdk — Help Desk Reference
+
+## Introduction
+
+**mbd-studio-sdk** is an SDK for MBD Studio backend services: search, features, scoring, and ranking. It powers recommendation feeds (Polymarket, Farcaster, Zora, etc.).
+
+**Entry points:**
+- `import { StudioConfig, StudioV1 } from 'mbd-studio-sdk'`
+- Default API base: `https://api.mbd.xyz/v3/studio`
+
+**Typical flow:**
+1. `StudioConfig` → `Studio` (with apiKey)
+2. `forUser(index, userId)` — set user for personalization
+3. `search().index(name).include()/exclude()/boost()...execute()` → candidates
+4. `addCandidates(candidates)`
+5. `features("v1").execute()` → `addFeatures(result)`
+6. `scoring().model("/scoring/...").execute()` → `addScores(result, key)`
+7. `ranking().sortingMethod('mix').mix(...).diversity(...).execute()` → `addRanking(result)`
+8. `getFeed()` — final ranked list
+
+**Debug tip:** All services expose `lastCall` and `lastResult` for inspecting the last request/response.
+
+---
+
+## Source Code (ordered for LLM consumption)
+
+### index.js (package entry)
+```js
+import * as V1 from './V1/index.js';
+export { StudioConfig } from './StudioConfig.js';
+export const StudioV1 = V1.Studio;
+```
+
+### StudioConfig.js
+```js
+const defaultBaseUrl = 'https://api.mbd.xyz/v3/studio';
+export class StudioConfig {
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('StudioConfig: options object is required');
+    const { apiKey, commonUrl, servicesUrl, log, show } = options;
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('StudioConfig: apiKey is required and must be a non-empty string');
+    const hasCommonUrl = typeof commonUrl === 'string' && commonUrl.trim().length > 0;
+    if (hasCommonUrl) {
+      const url = commonUrl.trim().replace(/\/$/, '');
+      this.searchService = this.storiesService = this.featuresService = this.scoringService = this.rankingService = url;
+    } else if (servicesUrl && typeof servicesUrl === 'object') {
+      const { searchService, storiesService, featuresService, scoringService, rankingService } = servicesUrl;
+      const services = { searchService, storiesService, featuresService, scoringService, rankingService };
+      const missing = Object.entries(services).filter(([, v]) => typeof v !== 'string' || !v.trim()).map(([k]) => k);
+      if (missing.length > 0) throw new Error(`StudioConfig: when using servicesUrl, all service URLs are required. Missing: ${missing.join(', ')}`);
+      [this.searchService, this.storiesService, this.featuresService, this.scoringService, this.rankingService] =
+        [searchService, storiesService, featuresService, scoringService, rankingService].map((u) => u.trim().replace(/\/$/, ''));
+    } else {
+      this.searchService = this.storiesService = this.featuresService = this.scoringService = this.rankingService = defaultBaseUrl;
+    }
+    this.apiKey = apiKey.trim();
+    this.log = typeof log === 'function' ? log : console.log.bind(console);
+    this.show = typeof show === 'function' ? show : console.log.bind(console);
+  }
+}
+```
+
+### V1/Studio.js (main orchestrator)
+```js
+import { StudioConfig } from '../StudioConfig.js';
+import { Search } from './search/Search.js';
+import { Features, sortAvailableFeatures } from './features/Features.js';
+import { Scoring } from './scoring/Scoring.js';
+import { Ranking } from './ranking/Ranking.js';
+import { findIndex } from './utils/indexUtils.js';
+
+export class Studio {
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('Studio: options object is required');
+    const { config, apiKey, commonUrl, servicesUrl, log, show, origin } = options;
+    this._config = config instanceof StudioConfig ? config : new StudioConfig({ commonUrl, servicesUrl, apiKey });
+    this._log = typeof log === 'function' ? log : this._config.log;
+    this._show = typeof show === 'function' ? show : this._config.show;
+    this._origin = typeof origin === 'string' && origin.trim() ? origin.trim() : 'sdk';
+    this._forUser = null;
+    this._candidates = [];
+  }
+  version() { return 'V1'; }
+  forUser(index, userId) { this._forUser = { index, id: userId }; }
+  search() { return new Search({ url: this._config.searchService, apiKey: this._config.apiKey, origin: this._origin, log: this._log, show: this._show }); }
+  async frequentValues(index, field, size = 25) { return this.search().index(index).frequentValues(field, size); }
+  addCandidates(array) { this._candidates.push(...array); }
+  features(version = 'v1') {
+    const items = this._candidates?.length > 0 ? this._candidates.map((hit) => ({ index: hit._index, id: hit._id })) : [];
+    return new Features({ url: this._config.featuresService, apiKey: this._config.apiKey, log: this._log, show: this._show, version, items, userIndex: this._forUser?.index, userId: this._forUser?.id, origin: this._origin });
+  }
+  addFeatures(featuresResult) {
+    const hits = this._candidates || [];
+    const { features, scores } = featuresResult;
+    if (!features && !scores) { this._log('No features or scores found'); return; }
+    let availableFeatures = {}, availableScores = {};
+    for (const hit of hits) {
+      const hitIndex = findIndex(hit._index);
+      const hitFeatures = features?.[hitIndex]?.[hit._id], hitScores = scores?.[hitIndex]?.[hit._id];
+      hit._features = hit._features ? { ...hit._features, ...hitFeatures } : hitFeatures;
+      hit._scores = hit._scores ? { ...hit._scores, ...hitScores } : hitScores;
+      if (hit._features) Object.entries(hit._features).forEach(([k, v]) => { if (typeof v === 'number' && !Number.isNaN(v)) availableFeatures[k] = true; });
+      if (hit._scores) Object.entries(hit._scores).forEach(([k, v]) => { if (typeof v === 'number' && !Number.isNaN(v)) availableScores[k] = true; });
+    }
+    this._log(`Available features: ${sortAvailableFeatures(Object.keys(availableFeatures))}`);
+    this._log(`Available scores: ${sortAvailableFeatures(Object.keys(availableScores))}`);
+  }
+  scoring() {
+    const userId = this._forUser?.id ?? null;
+    const itemIds = Array.isArray(this._candidates) && this._candidates.length > 0 ? this._candidates.map((c) => c?._id != null ? String(c._id) : null).filter(Boolean) : [];
+    return new Scoring({ url: this._config.scoringService, apiKey: this._config.apiKey, log: this._log, show: this._show, userId, itemIds, origin: this._origin });
+  }
+  addScores(scoringResult, scoringKey) {
+    const rankedItemIds = scoringResult;
+    if (!this._candidates || !rankedItemIds || !Array.isArray(rankedItemIds)) return;
+    const rankToScore = {}; rankedItemIds.forEach((itemId, i) => { rankToScore[itemId] = 1.0 - (i / rankedItemIds.length); });
+    for (const hit of this._candidates) { const s = rankToScore[hit._id]; if (s) { if (!hit._scores) hit._scores = {}; hit._scores[scoringKey] = s; } }
+  }
+  ranking() { return new Ranking({ url: this._config.rankingService, apiKey: this._config.apiKey, log: this._log, show: this._show, candidates: this._candidates, origin: this._origin }); }
+  addRanking(rankingResult) {
+    const rankedItems = rankingResult?.items;
+    if (!this._candidates || !rankedItems || !Array.isArray(rankedItems)) return;
+    const scoreByItemId = {}; rankedItems.forEach(({ item_id, score }) => { scoreByItemId[item_id] = score; });
+    for (const hit of this._candidates) hit._ranking_score = scoreByItemId[hit._id];
+    this._candidates.sort((a, b) => (b._ranking_score ?? -Infinity) - (a._ranking_score ?? -Infinity));
+  }
+  log(string) { this._log(string); }
+  show(results) { this._show(results === undefined ? this._candidates : results); }
+  getFeed() { return this._candidates; }
+}
+```
+
+### V1/search/Search.js
+```js
+import { Filter, TermFilter, TermsFilter, NumericFilter, MatchFilter, GeoFilter, DateFilter, IsNullFilter, NotNullFilter, CustomFilter, GroupBoostFilter, TermsLookupFilter, ConsoleAccountFilter } from './filters/index.js';
+
+export class Search {
+  _index = null; _es_query = null; _size = 100; _only_ids = false; _include_vector = false; _select_fields = null; _text = null; _vector = null; _sort_by = null;
+  _include = []; _exclude = []; _boost = []; _active_array = null;
+  lastCall = null; lastResult = null;
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('Search: options object is required');
+    const { url, apiKey, origin = 'sdk', log, show } = options;
+    if (typeof url !== 'string' || !url.trim()) throw new Error('Search: options.url is required');
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('Search: options.apiKey is required');
+    this._url = url.trim().replace(/\/$/, ''); this._apiKey = apiKey.trim(); this._origin = typeof origin === 'string' && origin.trim() ? origin.trim() : 'sdk';
+    this._log = typeof log === 'function' ? log : console.log.bind(console); this._show = typeof show === 'function' ? show : console.log.bind(console);
+  }
+  getEndpoint() {
+    if (this._es_query != null) return '/search/es_query';
+    const hasTextOrVector = (typeof this._text === 'string' && this._text.length > 0) || (Array.isArray(this._vector) && this._vector.length > 0);
+    if (hasTextOrVector) return '/search/semantic';
+    if (this._boost.length > 0) return '/search/boost';
+    return '/search/filter_and_sort';
+  }
+  getPayload() {
+    const endpoint = this.getEndpoint();
+    if (endpoint === '/search/es_query') return { index: this._index, origin: this._origin, feed_type: 'es_query', query: this._es_query };
+    const feedType = endpoint === '/search/semantic' ? 'semantic' : endpoint === '/search/boost' ? 'boost' : 'filter_and_sort';
+    const serializeFilters = (arr) => arr.map((f) => ({ ...f }));
+    const payload = { index: this._index, origin: this._origin, feed_type: feedType, include_vector: this._include_vector, size: this._size, include: serializeFilters(this._include), exclude: serializeFilters(this._exclude) };
+    if (feedType === 'boost') payload.boost = serializeFilters(this._boost);
+    if (feedType === 'filter_and_sort' && this._sort_by) payload.sort_by = this._sort_by;
+    if (feedType === 'semantic') { if (typeof this._text === 'string' && this._text.length > 0) payload.text = this._text; if (Array.isArray(this._vector) && this._vector.length > 0) payload.vector = this._vector; }
+    if (this._only_ids) payload.only_ids = true;
+    if (Array.isArray(this._select_fields) && this._select_fields.length > 0) payload.select_fields = this._select_fields;
+    return payload;
+  }
+  async execute() {
+    if (!this._index || typeof this._index !== 'string' || !this._index.trim()) throw new Error('Search.execute: index must be set (call index(name) first)');
+    if (this._es_query != null && (typeof this._es_query !== 'object' || Array.isArray(this._es_query))) throw new Error('Search.execute: esQuery() must be called with a plain object');
+    const endpoint = this.getEndpoint(), payload = this.getPayload(), url = `${this._url}${endpoint}`;
+    this.log(`Sending request to ${url}`); this.log(`Payload:\n${JSON.stringify(payload, null, 2)}`);
+    const startTime = performance.now();
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this._apiKey}` }, body: JSON.stringify(payload) });
+    const frontendTime = Math.round(performance.now() - startTime);
+    if (!response.ok) { const text = await response.text(); throw new Error(`Search API error: ${response.status} ${response.statusText}${text ? ` — ${text}` : ''}`); }
+    const result = await response.json();
+    if (result && typeof result.error !== 'undefined' && result.error !== null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    result.took_frontend = frontendTime; this.lastCall = { endpoint, payload }; this.lastResult = result;
+    if (!result.result) throw new Error('Search.execute: result.result is undefined');
+    const res = result.result; this._log(`Search result: total_hits=${res?.total_hits ?? 0} fetched=${res?.hits?.length ?? 0} took_es=${res?.took_es ?? 0} took_backend=${res?.took_backend ?? 0}`);
+    return res.hits;
+  }
+  async frequentValues(field, size = 25) {
+    if (!this._index || typeof this._index !== 'string' || !this._index.trim()) throw new Error('Search.frequentValues: index must be set');
+    if (typeof field !== 'string' || !field.trim()) throw new Error('Search.frequentValues: field must be a non-empty string');
+    const n = Number(size); if (!Number.isInteger(n) || n <= 0) throw new Error('Search.frequentValues: size must be a positive integer');
+    const endpoint = `/search/frequent_values/${encodeURIComponent(this._index)}/${encodeURIComponent(field.trim())}?size=${n}`;
+    const response = await fetch(`${this._url}${endpoint}`, { method: 'GET', headers: { Authorization: `Bearer ${this._apiKey}` } });
+    if (!response.ok) { const text = await response.text(); throw new Error(`Search frequentValues error: ${response.status}${text ? ` — ${text}` : ''}`); }
+    const result = await response.json(); if (result?.error != null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    return result;
+  }
+  async lookup(docId) {
+    if (!this._index || typeof this._index !== 'string' || !this._index.trim()) throw new Error('Search.lookup: index must be set');
+    if (typeof docId !== 'string' || !docId.trim()) throw new Error('Search.lookup: docId must be a non-empty string');
+    const endpoint = `/search/document/${encodeURIComponent(this._index)}/${encodeURIComponent(docId.trim())}`;
+    const response = await fetch(`${this._url}${endpoint}`, { method: 'GET', headers: { Authorization: `Bearer ${this._apiKey}` } });
+    if (!response.ok) { const text = await response.text(); throw new Error(`Search lookup error: ${response.status}${text ? ` — ${text}` : ''}`); }
+    const result = await response.json(); if (result?.error != null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    this.lastCall = { endpoint, payload: null }; this.lastResult = result; return result;
+  }
+  index(selected_index) { if (typeof selected_index !== 'string' || !selected_index.trim()) throw new Error('Search.index: selected_index must be a non-empty string'); this._index = selected_index.trim(); return this; }
+  size(size) { const n = Number(size); if (!Number.isInteger(n) || n <= 0 || n >= 2000) throw new Error('Search.size: size must be 1..1999'); this._size = n; return this; }
+  onlyIds(value) { this._only_ids = value == null ? true : Boolean(value); return this; }
+  includeVectors(value) { this._include_vector = value == null ? true : Boolean(value); return this; }
+  selectFields(fields) { if (fields === null) { this._select_fields = null; return this; } if (!Array.isArray(fields)) throw new Error('Search.selectFields: fields must be array'); this._select_fields = fields.map((f) => (typeof f === 'string' ? f.trim() : String(f))); return this; }
+  text(text) { if (typeof text !== 'string' || !text.trim()) throw new Error('Search.text: text required'); this._text = text.trim(); return this; }
+  vector(vector) { if (!Array.isArray(vector)) throw new Error('Search.vector: vector must be array'); this._vector = vector; return this; }
+  esQuery(rawQuery) { if (rawQuery == null || typeof rawQuery !== 'object' || Array.isArray(rawQuery)) throw new Error('Search.esQuery: rawQuery must be plain object'); this._es_query = rawQuery; return this; }
+  sortBy(field, direction = 'desc') { if (typeof field !== 'string' || !field.trim()) throw new Error('Search.sortBy: field required'); if (direction !== 'asc' && direction !== 'desc') throw new Error('Search.sortBy: direction must be asc/desc'); this._sort_by = { field: field.trim(), order: direction }; return this; }
+  include() { this._active_array = this._include; return this; }
+  exclude() { this._active_array = this._exclude; return this; }
+  boost() { this._active_array = this._boost; return this; }
+  _requireActiveArray() { if (this._active_array === null) throw new Error('Search: call include(), exclude(), or boost() before adding filters'); }
+  _requireBoostForBoostArray(boost) { if (this._active_array === this._boost && boost == null) throw new Error('Search: boost array requires non-null boost'); }
+  filter(filterInstance) {
+    this._requireActiveArray();
+    if (filterInstance == null || !(filterInstance instanceof Filter)) throw new Error('Search.filter: must be Filter instance');
+    if (this._active_array === this._boost && filterInstance.filter !== 'group_boost' && filterInstance.boost == null) throw new Error('Search: boost array filter needs non-null boost');
+    this._active_array.push(filterInstance); return this;
+  }
+  term(field, value, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new TermFilter(field, value, boost)); return this; }
+  terms(field, values, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new TermsFilter(field, values, boost)); return this; }
+  numeric(field, operator, value, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new NumericFilter(field, operator, value, boost)); return this; }
+  date(field, dateFrom = null, dateTo = null, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new DateFilter(field, dateFrom, dateTo, boost)); return this; }
+  geo(field, value, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new GeoFilter(field, value, boost)); return this; }
+  match(field, value, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new MatchFilter(field, value, boost)); return this; }
+  isNull(field, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new IsNullFilter(field, boost)); return this; }
+  notNull(field, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new NotNullFilter(field, boost)); return this; }
+  custom(field, value, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new CustomFilter(field, value, boost)); return this; }
+  groupBoost(lookup_index, field, value, group, min_boost = null, max_boost = null, n = null) { this._requireActiveArray(); this._active_array.push(new GroupBoostFilter(lookup_index, field, value, group, min_boost, max_boost, n)); return this; }
+  termsLookup(lookup_index, field, value, path, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new TermsLookupFilter(lookup_index, field, value, path, boost)); return this; }
+  consoleAccount(field, value, path, boost = null) { this._requireActiveArray(); this._requireBoostForBoostArray(boost); this._active_array.push(new ConsoleAccountFilter(field, value, path, boost)); return this; }
+  log(string) { this._log(string); }
+  show(results) { this._show(results); }
+}
+```
+
+### V1/search/filters/Filter.js (base)
+```js
+export class Filter {
+  constructor(filterType, field, boost = null) {
+    if (new.target === Filter) throw new Error('Filter is abstract');
+    this.filter = filterType; this.field = field; this.boost = boost;
+  }
+}
+```
+
+### V1/search/filters/index.js
+```js
+export { Filter } from './Filter.js';
+export { TermFilter } from './TermFilter.js';
+export { TermsFilter } from './TermsFilter.js';
+export { NumericFilter } from './NumericFilter.js';
+export { MatchFilter } from './MatchFilter.js';
+export { GeoFilter } from './GeoFilter.js';
+export { DateFilter } from './DateFilter.js';
+export { IsNullFilter } from './IsNullFilter.js';
+export { NotNullFilter } from './NotNullFilter.js';
+export { CustomFilter } from './CustomFilter.js';
+export { GroupBoostFilter } from './GroupBoostFilter.js';
+export { TermsLookupFilter } from './TermsLookupFilter.js';
+export { ConsoleAccountFilter } from './ConsoleAccountFilter.js';
+```
+
+### V1/search/filters/*.js (concrete filters)
+```js
+// TermFilter: exact match (field, value, boost?)
+// TermsFilter: match any of values (field, values[], boost?)
+// NumericFilter: numeric op (field, operator, value, boost?) — operators: >=, <=, >, <, =
+// DateFilter: date range (field, dateFrom?, dateTo?, boost?) — at least one of dateFrom/dateTo
+// MatchFilter: full-text match (field, value, boost?)
+// GeoFilter: geo query (field, value, boost?)
+// IsNullFilter: field is null (field, boost?)
+// NotNullFilter: field is not null (field, boost?)
+// CustomFilter: custom ES query (field, value, boost?)
+// GroupBoostFilter: boost by user group (lookup_index, field, value, group, min_boost?, max_boost?, n?) — no boost param
+// TermsLookupFilter: lookup terms from another index (lookup_index, field, value, path, boost?)
+// ConsoleAccountFilter: console account filter (field, value, path, boost?)
+```
+```js
+// Filter.js
+export class Filter { constructor(filterType, field, boost = null) { if (new.target === Filter) throw new Error('Filter is abstract'); this.filter = filterType; this.field = field; this.boost = boost; } }
+// TermFilter.js
+import { Filter } from './Filter.js'; export class TermFilter extends Filter { constructor(field, value, boost = null) { super('term', field, boost); this.value = value; } }
+// TermsFilter.js
+import { Filter } from './Filter.js'; export class TermsFilter extends Filter { constructor(field, value, boost = null) { super('terms', field, boost); this.value = value; } }
+// NumericFilter.js
+import { Filter } from './Filter.js'; export class NumericFilter extends Filter { constructor(field, operator, value, boost = null) { super('numeric', field, boost); this.operator = operator; this.value = value; } }
+// MatchFilter.js
+import { Filter } from './Filter.js'; export class MatchFilter extends Filter { constructor(field, value, boost = null) { super('match', field, boost); this.value = value; } }
+// DateFilter.js
+import { Filter } from './Filter.js'; export class DateFilter extends Filter { constructor(field, dateFrom = null, dateTo = null, boost = null) { super('date', field, boost); if (dateFrom == null && dateTo == null) throw new Error('DateFilter: need dateFrom or dateTo'); this.value = {}; if (dateFrom != null) this.value.date_from = dateFrom; if (dateTo != null) this.value.date_to = dateTo; } }
+// GeoFilter.js
+import { Filter } from './Filter.js'; export class GeoFilter extends Filter { constructor(field, value, boost = null) { super('geo', field, boost); this.value = value; } }
+// IsNullFilter.js
+import { Filter } from './Filter.js'; export class IsNullFilter extends Filter { constructor(field, boost = null) { super('is_null', field, boost); } }
+// NotNullFilter.js
+import { Filter } from './Filter.js'; export class NotNullFilter extends Filter { constructor(field, boost = null) { super('not_null', field, boost); } }
+// CustomFilter.js
+import { Filter } from './Filter.js'; export class CustomFilter extends Filter { constructor(field, value, boost = null) { super('custom', field, boost); this.value = value; } }
+// GroupBoostFilter.js
+import { Filter } from './Filter.js'; export class GroupBoostFilter extends Filter { constructor(lookup_index, field, value, group, min_boost = null, max_boost = null, n = null) { super('group_boost', field, null); this.lookup_index = lookup_index; this.value = value; this.group = group; this.min_boost = min_boost; this.max_boost = max_boost; this.n = n; } }
+// TermsLookupFilter.js
+import { Filter } from './Filter.js'; export class TermsLookupFilter extends Filter { constructor(lookup_index, field, value, path, boost = null) { super('terms_lookup', field, boost); this.lookup_index = lookup_index; this.value = value; this.path = path; } }
+// ConsoleAccountFilter.js
+import { Filter } from './Filter.js'; export class ConsoleAccountFilter extends Filter { constructor(field, value, path, boost = null) { super('console_account', field, boost); this.value = value; this.path = path; } }
+```
+
+### V1/features/Features.js
+```js
+export const PREFERRED_FEATURE_COLUMNS = ['found', 'original_rank', 'sem_sim_fuzzy', 'sem_sim_closest', 'usr_primary_labels', 'usr_secondary_labels', 'usr_primary_tags', 'usr_secondary_tags', 'user_affinity_avg', 'user_affinity_usdc', 'user_affinity_count', 'cluster_1','cluster_2','cluster_3','cluster_4','cluster_5','cluster_6','cluster_7','cluster_8','cluster_9','cluster_10', 'sem_sim_cluster1','sem_sim_cluster2','sem_sim_cluster3','sem_sim_cluster4','sem_sim_cluster5'];
+export function sortAvailableFeatures(available) {
+  const preferred = PREFERRED_FEATURE_COLUMNS.filter((c) => available.includes(c));
+  const nonPreferred = available.filter((c) => !PREFERRED_FEATURE_COLUMNS.includes(c));
+  const regular = nonPreferred.filter((c) => !c.startsWith('AI:') && !c.startsWith('TAG:')).sort();
+  const aiColumns = nonPreferred.filter((c) => c.startsWith('AI:')).sort();
+  const tagColumns = nonPreferred.filter((c) => c.startsWith('TAG:')).sort();
+  return [...preferred, ...regular, ...aiColumns, ...tagColumns];
+}
+export class Features {
+  _version = 'v1'; _user = null; _items = []; lastCall = null; lastResult = null;
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('Features: options required');
+    const { url, apiKey, version = 'v1', items = [], userIndex, userId, origin = 'sdk', log, show } = options;
+    if (typeof url !== 'string' || !url.trim()) throw new Error('Features: url required');
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('Features: apiKey required');
+    this._url = url.trim().replace(/\/$/, ''); this._apiKey = apiKey.trim(); this._version = version; this._origin = origin?.trim() || 'sdk';
+    this._log = typeof log === 'function' ? log : console.log; this._show = typeof show === 'function' ? show : console.log;
+    if (Array.isArray(items) && items.length > 0) this._items = items;
+    if (userIndex != null && userId != null) this._user = { index: userIndex, id: userId };
+  }
+  getEndpoint() { return `/features/${this._version}`; }
+  getPayload() { return { origin: this._origin, user: this._user, items: this._items.map((i) => ({ ...i })) }; }
+  version(v) { this._version = v; return this; }
+  items(items) { this._items = [...items]; return this; }
+  user(index, userId) { this._user = { index, id: userId }; return this; }
+  async execute() {
+    if (!this._user?.index || !this._user?.id) throw new Error('Features.execute: user must be set');
+    if (!Array.isArray(this._items) || this._items.length === 0) throw new Error('Features.execute: items must be non-empty');
+    const url = `${this._url}${this.getEndpoint()}`; const payload = this.getPayload();
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this._apiKey}` }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Features API error: ${response.status} ${await response.text()}`);
+    const result = await response.json(); if (result?.error != null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    this.lastCall = { endpoint: this.getEndpoint(), payload }; this.lastResult = result;
+    return result.result;
+  }
+  log(string) { this._log(string); }
+  show(results) { this._show(results); }
+}
+```
+
+### V1/scoring/Scoring.js
+```js
+export class Scoring {
+  _userId = null; _itemIds = []; _modelEndpoint = null; lastCall = null; lastResult = null;
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('Scoring: options required');
+    const { url, apiKey, userId = null, itemIds = [], origin = 'sdk', log, show } = options;
+    if (typeof url !== 'string' || !url.trim()) throw new Error('Scoring: url required');
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('Scoring: apiKey required');
+    this._url = url.trim().replace(/\/$/, ''); this._apiKey = apiKey.trim(); this._origin = origin?.trim() || 'sdk';
+    this._log = typeof log === 'function' ? log : console.log; this._show = typeof show === 'function' ? show : console.log;
+    if (userId != null && typeof userId === 'string' && userId.trim()) this._userId = userId.trim();
+    if (Array.isArray(itemIds) && itemIds.length > 0) this._itemIds = itemIds.map((id) => String(id));
+  }
+  getEndpoint() { if (!this._modelEndpoint?.trim()) throw new Error('Scoring: call model(endpoint) first'); return this._modelEndpoint.startsWith('/') ? this._modelEndpoint : `/${this._modelEndpoint}`; }
+  getPayload() { return { origin: this._origin, user_id: this._userId, item_ids: [...this._itemIds] }; }
+  model(endpoint) { this._modelEndpoint = endpoint; return this; }
+  userId(userId) { this._userId = userId; return this; }
+  itemIds(itemIds) { this._itemIds = itemIds; return this; }
+  async execute() {
+    if (!this._modelEndpoint?.trim()) throw new Error('Scoring: model endpoint required');
+    if (!this._userId?.trim()) throw new Error('Scoring: user_id required');
+    if (!Array.isArray(this._itemIds) || this._itemIds.length === 0) throw new Error('Scoring: item_ids required');
+    const url = `${this._url}${this.getEndpoint()}`; const payload = this.getPayload();
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this._apiKey}` }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Scoring API error: ${response.status} ${await response.text()}`);
+    const result = await response.json(); if (result?.error != null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    this.lastCall = { endpoint: this.getEndpoint(), payload }; this.lastResult = result;
+    return result.result;
+  }
+  log(string) { this._log(string); }
+  show(results) { this._show(results); }
+}
+```
+
+### V1/ranking/Ranking.js
+```js
+export class Ranking {
+  _candidates = []; _sortMethod = 'sort'; _sortParams = null; _diversityMethod = null; _diversityParams = null; _limitsByFieldEnabled = false; _everyN = 10; _limitRules = [];
+  lastCall = null; lastResult = null;
+  constructor(options) {
+    if (!options || typeof options !== 'object') throw new Error('Ranking: options required');
+    const { url, apiKey, candidates = [], origin = 'sdk', log, show } = options;
+    if (typeof url !== 'string' || !url.trim()) throw new Error('Ranking: url required');
+    if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('Ranking: apiKey required');
+    this._url = url.trim().replace(/\/$/, ''); this._apiKey = apiKey.trim(); this._origin = origin?.trim() || 'sdk'; this._candidates = candidates;
+    this._log = typeof log === 'function' ? log : console.log; this._show = typeof show === 'function' ? show : console.log;
+  }
+  getEndpoint() { return '/ranking/feed'; }
+  _getUsefulFieldsAndNeedEmbedding() {
+    const useful = new Set(); let needEmbedding = false;
+    if (this._sortParams) {
+      if (this._sortMethod === 'sort' && Array.isArray(this._sortParams.fields)) this._sortParams.fields.forEach((f) => useful.add(f));
+      if ((this._sortMethod === 'linear' || this._sortMethod === 'mix') && Array.isArray(this._sortParams)) this._sortParams.forEach((p) => p.field && useful.add(p.field));
+    }
+    if (this._diversityMethod === 'fields' && this._diversityParams?.fields) this._diversityParams.fields.forEach((f) => useful.add(f));
+    if (this._diversityMethod === 'semantic') needEmbedding = true;
+    if (this._limitsByFieldEnabled && this._limitRules.length > 0) this._limitRules.forEach((r) => r.field && useful.add(r.field));
+    return { usefulFields: useful, needEmbedding };
+  }
+  getPayload() {
+    const { usefulFields, needEmbedding } = this._getUsefulFieldsAndNeedEmbedding();
+    const hits = this._candidates || [];
+    const items = hits.map((hit) => {
+      const item = { item_id: hit._id };
+      for (const key of usefulFields) { const v = hit._features?.[key] ?? hit._scores?.[key]; if (v !== undefined) item[key] = v; }
+      if (needEmbedding) { let embed = hit._source?.item_sem_embed2 || hit._source?.text_vector; if (embed) item.embed = embed; }
+      return item;
+    });
+    const payload = { origin: this._origin, items };
+    const sortConfig = this._buildSortConfig(); if (sortConfig) payload.sort = sortConfig;
+    const diversityConfig = this._buildDiversityConfig(); if (diversityConfig) payload.diversity = diversityConfig;
+    const limitsByFieldConfig = this._buildLimitsByFieldConfig(); if (limitsByFieldConfig) payload.limits_by_field = limitsByFieldConfig;
+    return payload;
+  }
+  _buildSortConfig() {
+    if (!this._sortParams) return undefined;
+    if (this._sortMethod === 'sort' && this._sortParams.fields?.length > 0) return { method: 'sort', params: { ...this._sortParams } };
+    if (this._sortMethod === 'linear' && Array.isArray(this._sortParams) && this._sortParams.length > 0) return { method: 'linear', params: this._sortParams.map((p) => ({ field: p.field, weight: p.weight })) };
+    if (this._sortMethod === 'mix' && Array.isArray(this._sortParams) && this._sortParams.length > 0) return { method: 'mix', params: this._sortParams.map((p) => ({ field: p.field, direction: p.direction, percentage: p.percentage })) };
+    return undefined;
+  }
+  _buildDiversityConfig() {
+    if (!this._diversityMethod) return undefined;
+    if (this._diversityMethod === 'fields' && this._diversityParams?.fields?.length > 0) return { method: 'fields', params: { fields: [...this._diversityParams.fields] } };
+    if (this._diversityMethod === 'semantic') return { method: 'semantic', params: { lambda: Number(this._diversityParams?.lambda ?? 0.5), horizon: Number(this._diversityParams?.horizon ?? 20) } };
+    return undefined;
+  }
+  _buildLimitsByFieldConfig() {
+    if (!this._limitsByFieldEnabled || !this._limitRules.length) return undefined;
+    const everyN = Number(this._everyN); if (!Number.isInteger(everyN) || everyN < 2) return undefined;
+    return { every_n: everyN, rules: this._limitRules.map((r) => ({ field: r.field, limit: Number(r.limit) || 0 })) };
+  }
+  sortingMethod(x) { if (!['sort','linear','mix'].includes(x)) throw new Error('Ranking.sortingMethod: must be sort, linear, or mix'); this._sortMethod = x; this._sortParams = x === 'sort' ? { fields: [], direction: [] } : []; return this; }
+  sortBy(field, direction = 'desc', field2, direction2 = 'desc') {
+    if (this._sortMethod === 'linear' || this._sortMethod === 'mix') throw new Error('Ranking.sortBy: only for sortingMethod("sort")');
+    this._sortMethod = 'sort'; if (!this._sortParams?.fields) this._sortParams = { fields: [], direction: [] };
+    const f = typeof field === 'string' && field.trim() ? field.trim() : null; if (!f) throw new Error('Ranking.sortBy: field required');
+    this._sortParams = { fields: [f], direction: [direction === 'asc' ? 'asc' : 'desc'] };
+    if (typeof field2 === 'string' && field2.trim()) { this._sortParams.fields.push(field2.trim()); this._sortParams.direction.push(direction2 === 'asc' ? 'asc' : 'desc'); }
+    return this;
+  }
+  weight(field, w) { if (this._sortMethod !== 'linear') throw new Error('Ranking.weight: only for linear'); const f = field?.trim(); if (!f) throw new Error('Ranking.weight: field required'); if (!Array.isArray(this._sortParams)) this._sortParams = []; this._sortParams.push({ field: f, weight: Number(w) }); return this; }
+  mix(field, direction, percentage) { if (this._sortMethod === 'linear') throw new Error('Ranking.mix: only for mix'); this._sortMethod = 'mix'; if (!Array.isArray(this._sortParams)) this._sortParams = []; const f = field?.trim(); if (!f) throw new Error('Ranking.mix: field required'); this._sortParams.push({ field: f, direction, percentage: Number(percentage) || 0 }); return this; }
+  diversity(method) { if (!['fields','semantic'].includes(method)) throw new Error('Ranking.diversity: fields or semantic'); this._diversityMethod = method; this._diversityParams = method === 'fields' ? { fields: [] } : { lambda: 0.5, horizon: 20 }; return this; }
+  fields(arrayOrItem) { if (this._diversityMethod !== 'fields') throw new Error('Ranking.fields: only for diversity("fields")'); if (!this._diversityParams?.fields) this._diversityParams = { fields: [] }; const add = (n) => { const s = typeof n === 'string' && n.trim() ? n.trim() : null; if (s && !this._diversityParams.fields.includes(s)) this._diversityParams.fields.push(s); }; Array.isArray(arrayOrItem) ? arrayOrItem.forEach(add) : add(arrayOrItem); return this; }
+  horizon(n) { if (this._diversityMethod !== 'semantic') throw new Error('Ranking.horizon: only for semantic'); if (!this._diversityParams) this._diversityParams = { lambda: 0.5, horizon: 20 }; this._diversityParams.horizon = Number(n); return this; }
+  lambda(value) { if (this._diversityMethod !== 'semantic') throw new Error('Ranking.lambda: only for semantic'); if (!this._diversityParams) this._diversityParams = { lambda: 0.5, horizon: 20 }; this._diversityParams.lambda = Number(value); return this; }
+  limitByField() { this._limitsByFieldEnabled = true; return this; }
+  every(n) { this._everyN = Number(n); return this; }
+  limit(field, max) { const f = field?.trim(); if (!f) throw new Error('Ranking.limit: field required'); const existing = this._limitRules.find((r) => r.field === f); if (existing) existing.limit = Number(max) || 0; else this._limitRules.push({ field: f, limit: Number(max) || 0 }); return this; }
+  candidates(candidates) { this._candidates = candidates; return this; }
+  async execute() {
+    if (!Array.isArray(this._candidates) || this._candidates.length === 0) throw new Error('Ranking.execute: candidates required');
+    const sortConfig = this._buildSortConfig(); if (!sortConfig) throw new Error('Ranking.execute: sort config required (e.g. sortingMethod("sort").sortBy("field","desc"))');
+    const url = `${this._url}${this.getEndpoint()}`; const payload = this.getPayload();
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this._apiKey}` }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Ranking API error: ${response.status} ${await response.text()}`);
+    const result = await response.json(); if (result?.error != null) throw new Error(typeof result.error === 'string' ? result.error : String(result.error));
+    this.lastCall = { endpoint: this.getEndpoint(), payload }; this.lastResult = result;
+    return result.result;
+  }
+  log(string) { this._log(string); }
+  show(results) { this._show(results); }
+}
+```
+
+### V1/utils/indexUtils.js
+```js
+// Maps index names to canonical base (farcaster-items, zora-coins, polymarket-items, polymarket-wallets)
+export function findIndex(index) {
+  const options = ['farcaster-items', 'zora-coins', 'polymarket-items', 'polymarket-wallets'];
+  for (const opt of options) if (index.startsWith(opt)) return opt;
+  return null;
+}
+```
+
+---
+
+## Tips for Help Desk
+
+1. **"index must be set"** → User forgot to call `.index("index-name")` before execute/frequentValues/lookup.
+2. **"call include(), exclude(), or boost() before adding filters"** → Must chain `.include()`, `.exclude()`, or `.boost()` before `.term()`, `.numeric()`, etc.
+3. **"boost array requires non-null boost"** → When using `.boost()`, each filter (except `groupBoost`) needs a numeric boost.
+4. **Features/Scoring "user must be set"** → Call `forUser(index, userId)` on Studio before features/scoring.
+5. **Scoring "model endpoint required"** → Call `.model("/scoring/ranking_model/...")` before execute.
+6. **Ranking "sort config required"** → Use `.sortingMethod('sort').sortBy('field','desc')` or `.sortingMethod('mix').mix(...)` before execute.
+7. **Search endpoints:** `/search/filter_and_sort` (default), `/search/semantic` (text/vector), `/search/boost` (has boost filters), `/search/es_query` (raw ES query).
+8. **Candidates structure:** Each hit has `_id`, `_index`, `_source`, and after addFeatures/addScores: `_features`, `_scores`; after addRanking: `_ranking_score`.
