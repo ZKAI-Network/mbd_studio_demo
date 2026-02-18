@@ -4,14 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { Search, X } from "lucide-react";
 
 const TOPICS = [
-  { value: "mbd2:t_news_social_concern", label: "News" },
-  { value: "mbd2:t_science_technology", label: "Sci/Tech" },
-  { value: "mbd2:t_business_entrepreneurs", label: "Business" },
-  { value: "mbd2:t_sports", label: "Sports" },
-  { value: "mbd2:t_celebrity_pop_culture", label: "Pop Culture" },
-  { value: "mbd2:t_gaming", label: "Gaming" },
-  { value: "mbd2:t_film_tv_video", label: "Film/TV" },
-  { value: "mbd2:t_arts_culture", label: "Arts" },
+  { value: "Sports", label: "Sports" },
+  { value: "Crypto", label: "Crypto" },
+  { value: "Politics", label: "Politics" },
+  { value: "Games", label: "Games" },
+  { value: "Esports", label: "Esports" },
+  { value: "Finance", label: "Finance" },
+  { value: "Weather", label: "Weather" },
+  { value: "Culture", label: "Culture" },
 ];
 
 const SORT_OPTIONS = [

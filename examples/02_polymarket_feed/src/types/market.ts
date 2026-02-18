@@ -34,6 +34,7 @@ export interface PipelineResponse {
   markets: Market[];
   bets: Record<string, FeatureBet[]> | null;
   isPersonalized: boolean;
+  totalHits: number;
 }
 
 export interface Story {

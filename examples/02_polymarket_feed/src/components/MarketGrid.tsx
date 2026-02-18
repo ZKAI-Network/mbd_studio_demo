@@ -10,13 +10,14 @@ interface Props {
   bets: Record<string, FeatureBet[]> | null;
   isLoading: boolean;
   onLoadMore?: () => void;
+  hasMore?: boolean;
 }
 
-export default function MarketGrid({ markets, bets, isLoading, onLoadMore }: Props) {
+export default function MarketGrid({ markets, bets, isLoading, onLoadMore, hasMore }: Props) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!onLoadMore || !sentinelRef.current) return;
+    if (!onLoadMore || !hasMore || !sentinelRef.current) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) onLoadMore();
@@ -25,7 +26,7 @@ export default function MarketGrid({ markets, bets, isLoading, onLoadMore }: Pro
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [onLoadMore]);
+  }, [onLoadMore, hasMore]);
 
   if (isLoading && markets.length === 0) {
     return (
@@ -58,7 +59,11 @@ export default function MarketGrid({ markets, bets, isLoading, onLoadMore }: Pro
           />
         ))}
       </div>
-      <div ref={sentinelRef} />
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center py-8">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+        </div>
+      )}
     </>
   );
 }

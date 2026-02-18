@@ -20,6 +20,13 @@ function getDateRange(): [string, string] {
   return [from.toISOString(), to.toISOString()];
 }
 
+// Pad short queries so semantic search meets the 5-char minimum
+function padQuery(q: string): string {
+  const trimmed = q.trim();
+  if (trimmed.length >= 5) return trimmed;
+  return `${trimmed} markets predictions`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -29,7 +36,7 @@ export async function POST(req: NextRequest) {
       topics,
       sortField = "volume_24hr",
       sortOrder = "desc",
-      size = 25,
+      size = 100,
     } = body;
 
     const mbd = createStudio(wallet);
@@ -40,27 +47,34 @@ export async function POST(req: NextRequest) {
 
     if (wallet) {
       // --- Personalized pipeline: boost → features → scoring → ranking ---
-      // includeVectors and selectFields are mutually exclusive — vectors needed for semantic diversity
       const search = mbd.search()
         .index("polymarket-items")
         .size(150)
-        .includeVectors(true)
-        .include()
+        .includeVectors(true);
+
+      // Use semantic search (.text()) for text queries, otherwise use boost
+      if (query) search.text(padQuery(query));
+
+      search.include()
           .term("active", true)
           .numeric("liquidity_num", ">", 5000)
           .numeric("volume_num", ">", 500)
           .numeric("volume_24hr", ">", 100)
-          .date("end_date", dateFrom, dateTo)
-        .exclude()
+          .date("end_date", dateFrom, dateTo);
+
+      if (topics?.length) search.terms("tags", topics);
+
+      search.exclude()
           .term("closed", true)
           .term("archived", true)
-          .term("price_0_or_1", true)
-        .boost()
+          .term("price_0_or_1", true);
+
+      // Only add boost when not using text search (they use different endpoints)
+      if (!query) {
+        search.boost()
           .groupBoost("polymarket-wallets", "ai_labels_med", wallet, "label", 1, 5, 5)
           .groupBoost("polymarket-wallets", "tags", wallet, "tag", 1, 3, 5);
-
-      if (query) search.include().match("question", query);
-      if (topics?.length) search.include().terms("ai_labels_med", topics);
+      }
 
       const candidates = await search.execute();
       mbd.addCandidates(candidates);
@@ -104,28 +118,35 @@ export async function POST(req: NextRequest) {
         isPersonalized = true;
       } catch (e) {
         console.warn("Personalization fallback (features/scoring/ranking failed):", e);
-        // Fall back to boost order
       }
     } else {
-      // --- Unpersonalized pipeline: filter + sort ---
+      // --- Unpersonalized pipeline ---
       const search = mbd.search()
         .index("polymarket-items")
         .size(size)
-        .sortBy(sortField, sortOrder)
-        .selectFields(SELECT_FIELDS)
-        .include()
+        .selectFields(SELECT_FIELDS);
+
+      // Use semantic search for text queries, filter_and_sort otherwise
+      if (query) {
+        search.text(padQuery(query));
+        // No sortBy with semantic search — results ordered by relevance
+      } else {
+        search.sortBy(sortField, sortOrder);
+      }
+
+      search.include()
           .term("active", true)
           .numeric("liquidity_num", ">", 5000)
           .numeric("volume_num", ">", 500)
           .numeric("volume_24hr", ">", 100)
-          .date("end_date", dateFrom, dateTo)
-        .exclude()
+          .date("end_date", dateFrom, dateTo);
+
+      if (topics?.length) search.terms("tags", topics);
+
+      search.exclude()
           .term("closed", true)
           .term("archived", true)
           .term("price_0_or_1", true);
-
-      if (query) search.include().match("question", query);
-      if (topics?.length) search.include().terms("ai_labels_med", topics);
 
       const candidates = await search.execute();
       mbd.addCandidates(candidates);
@@ -136,7 +157,7 @@ export async function POST(req: NextRequest) {
     const hits = (feed as any)?.data?.hits ?? (feed as any)?.hits ?? (feed as any) ?? [];
     const markets = (Array.isArray(hits) ? hits : []).map(transformHit);
 
-    return NextResponse.json({ markets, bets, isPersonalized });
+    return NextResponse.json({ markets, bets, isPersonalized, totalHits: markets.length });
   } catch (error) {
     console.error("Pipeline error:", error);
     return NextResponse.json(
