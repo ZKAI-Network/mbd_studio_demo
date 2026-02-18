@@ -108,7 +108,7 @@ Each prompt in the [vibecoding guide](#get-started) includes the complete API co
 
 1. **Project + Types + SDK** -- Next.js scaffold, Tailwind dark theme, TypeScript types, SDK initialization, field mappers
 2. **Search & Personalization Pipeline** -- Semantic search for text queries, boost search with `groupBoost` for wallet personalization, ML features, scoring rerank, semantic diversity ranking with cluster limits. Topic filtering uses Polymarket's `tags` field (Sports, Crypto, Politics, etc.)
-3. **UI Components + Polish** -- Market cards with YES/NO prices, responsive grid with infinite scroll (client-side progressive reveal), search bar with topic pills, wallet input, keyboard shortcuts, formatting
+3. **UI Components + Polish** -- Market cards with YES/NO prices, responsive grid with infinite scroll (client-side progressive reveal), search bar with topic pills and context-aware sort (hidden when personalized or searching), wallet input, keyboard shortcuts, formatting
 4. **Price Charts** -- Real Polymarket CLOB price history via `liveline`, with synthetic sparkline fallback
 5. **Advanced Features** (optional) -- Semantic search enhancements, ranking controls, frequent values explorer
 

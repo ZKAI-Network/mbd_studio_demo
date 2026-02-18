@@ -552,8 +552,9 @@ Create the UI components for the prediction markets app, fully wired and polishe
 ### 3. SearchBar (`src/components/SearchBar.tsx`)
 - Text input, topic pills (toggleable), sort dropdown
 - Topic pills use Polymarket `tags` values: Sports, Crypto, Politics, Games, Esports, Finance, Weather, Culture
-- Sort options: 24h Volume, Liquidity, Price Change, Newest, Ending Soon
-- Sort dropdown is hidden when a text query is active (semantic search orders by relevance)
+- Sort options with per-option sort order: 24h Volume (desc), Liquidity (desc), Price Change (desc), Newest (desc), Ending Soon (asc)
+- Export a `getSortOrder(field)` helper so page.tsx can derive the correct sort direction
+- `showSort` prop — sort dropdown is hidden when personalized (ranking controls order) or when a text query is active (semantic search controls order). Only visible for unpersonalized browsing.
 
 ### 4. WalletInput (`src/components/WalletInput.tsx`)
 - Ethereum address input with validation (0x + 40 hex chars)
@@ -576,7 +577,9 @@ Create the UI components for the prediction markets app, fully wired and polishe
 ## Wire in page.tsx
 - Use `useWallet` and `useFullPipeline` hooks
 - Render Header, WalletInput, SearchBar, MarketGrid
-- Pass search params (query, topics, sortField, wallet) to the pipeline hook
+- Pass search params (query, topics, sortField, sortOrder, wallet) to the pipeline hook
+- Derive `sortOrder` from `sortField` using `getSortOrder()` from SearchBar (e.g. "Ending Soon" uses `asc`, everything else `desc`)
+- Pass `showSort={!isPersonalized && !query}` to SearchBar — hides the sort dropdown when it has no effect
 - **Infinite scroll (client-side progressive reveal):**
   - Add `visibleCount` state starting at 25
   - Slice `allMarkets` to `visibleCount` before passing to MarketGrid

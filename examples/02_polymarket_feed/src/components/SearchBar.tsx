@@ -15,12 +15,16 @@ const TOPICS = [
 ];
 
 const SORT_OPTIONS = [
-  { value: "volume_24hr", label: "24h Volume" },
-  { value: "liquidity_num", label: "Liquidity" },
-  { value: "one_day_price_change", label: "Price Change" },
-  { value: "created_at", label: "Newest" },
-  { value: "end_date", label: "Ending Soon" },
+  { value: "volume_24hr", label: "24h Volume", order: "desc" },
+  { value: "liquidity_num", label: "Liquidity", order: "desc" },
+  { value: "one_day_price_change", label: "Price Change", order: "desc" },
+  { value: "created_at", label: "Newest", order: "desc" },
+  { value: "end_date", label: "Ending Soon", order: "asc" },
 ];
+
+export function getSortOrder(field: string): "asc" | "desc" {
+  return SORT_OPTIONS.find((o) => o.value === field)?.order as "asc" | "desc" ?? "desc";
+}
 
 interface Props {
   query: string;
@@ -29,12 +33,14 @@ interface Props {
   onTopicsChange: (t: string[]) => void;
   sortField: string;
   onSortChange: (s: string) => void;
+  showSort?: boolean;
 }
 
 export default function SearchBar({
   query, onQueryChange,
   topics, onTopicsChange,
   sortField, onSortChange,
+  showSort = true,
 }: Props) {
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,17 +93,19 @@ export default function SearchBar({
           )}
         </div>
 
-        <select
-          value={sortField}
-          onChange={(e) => onSortChange(e.target.value)}
-          className="px-3 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground outline-none cursor-pointer"
-        >
-          {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        {showSort && (
+          <select
+            value={sortField}
+            onChange={(e) => onSortChange(e.target.value)}
+            className="px-3 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground outline-none cursor-pointer"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">

@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { useFullPipeline } from "@/hooks/useFullPipeline";
 import Header from "@/components/Header";
-import SearchBar from "@/components/SearchBar";
+import SearchBar, { getSortOrder } from "@/components/SearchBar";
 import WalletInput from "@/components/WalletInput";
 import MarketGrid from "@/components/MarketGrid";
 
@@ -15,15 +15,17 @@ export default function Home() {
   const [sortField, setSortField] = useState("volume_24hr");
   const [visibleCount, setVisibleCount] = useState(25);
 
+  const sortOrder = getSortOrder(sortField);
+
   const searchParams = useMemo(
     () => ({
       wallet: isValid ? wallet : undefined,
       query: query || undefined,
       topics: topics.length ? topics : undefined,
       sortField,
-      sortOrder: "desc" as const,
+      sortOrder,
     }),
-    [wallet, isValid, query, topics, sortField]
+    [wallet, isValid, query, topics, sortField, sortOrder]
   );
 
   // Reset visible count when search params change
@@ -66,6 +68,7 @@ export default function Home() {
           onTopicsChange={setTopics}
           sortField={sortField}
           onSortChange={setSortField}
+          showSort={!isPersonalized && !query}
         />
       </div>
 
