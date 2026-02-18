@@ -21,3 +21,4 @@ This repo contains examples and demos for the **MBD Studio SDK** — the backend
 ## Examples
 
 - **[01 — Getting Started](examples/01_getting_started/)** — Polymarket recommendations demo: search → features → scoring → ranking pipeline
+- **[02 — Polymarket Feed](examples/02_polymarket_feed/)** — Full-stack Next.js app with personalized Polymarket prediction market feed, real-time charts, and wallet-based recommendations
