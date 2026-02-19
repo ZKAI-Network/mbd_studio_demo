@@ -327,7 +327,7 @@ const search = mbd.search()
 // Use semantic search for text queries, filter_and_sort for browsing
 if (query) {
   // .text() triggers semantic search — results ordered by relevance, not sortBy
-  // Minimum 5 chars required — pad short queries (e.g. "iran" → "iran markets predictions")
+  // Minimum 5 chars required — pad short queries (e.g. "AI" → "AI markets predictions")
   search.text(query.length >= 5 ? query : `${query} markets predictions`);
 } else {
   search.sortBy("volume_24hr", "desc");
@@ -353,7 +353,7 @@ mbd.addCandidates(candidates);
 const feed = mbd.getFeed();
 ```
 
-**Text search:** Use `.text(query)` for user search queries — it uses semantic (vector) search to find markets by meaning, not just keywords. For example, searching "iran" finds "US strikes Iran", "Iranian rials", "Iranian regime" even though the query is short. The `.match()` filter is broad/fuzzy and should NOT be used for user-facing search.
+**Text search:** Use `.text(query)` for user search queries — it uses semantic (vector) search to find markets by meaning, not just keywords. For example, searching "AI models" finds "GPT-5 release date", "Claude benchmarks", "open-source AI" even though the query is short. The `.match()` filter is broad/fuzzy and should NOT be used for user-facing search.
 
 **Topic tags for filtering** (use with `tags` field, `.terms()` filter):
 `Sports`, `Crypto`, `Politics`, `Games`, `Esports`, `Finance`, `Weather`, `Culture`
@@ -488,7 +488,7 @@ Error handling: if features/scoring fails (user not found), fall back to boost s
    - **No wallet, with query:** semantic search via `.text()` → return 100 results sorted by relevance (client reveals 25 at a time)
    - **With wallet, no query:** boost search (150 items) → features → scoring → ranking → personalized feed
    - **With wallet, with query:** semantic search (150 items) → features → scoring → ranking → personalized + relevant feed
-   - For text queries, pad short strings (< 5 chars) to meet the `.text()` minimum: `"iran"` → `"iran markets predictions"`
+   - For text queries, pad short strings (< 5 chars) to meet the `.text()` minimum: `"AI"` → `"AI markets predictions"`
    - Topic filtering uses `.terms("tags", topics)` with Polymarket tag values (e.g. "Sports", "Crypto", "Politics")
    - Extract bets from features result
    - Fall back to boost/search order if features/scoring fails

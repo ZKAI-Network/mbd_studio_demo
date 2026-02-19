@@ -16,7 +16,7 @@ The main grid is a responsive layout (1-3 columns) with search, topic filtering,
 
 The core idea is a 4-stage pipeline that turns raw market data into a personalized, diverse feed. Each stage builds on the previous one, and the SDK handles the state management between them.
 
-**Search** -- Filter active markets by liquidity, volume, and date range. When a user types a query, semantic search (`.text()`) finds markets by meaning -- searching "iran" returns "US strikes Iran", "Iranian rials", and "Iranian regime" without any keyword hacks. When a wallet is connected and no query is active, boost results by that wallet's preferred topics and tags using `groupBoost`. Fetch 150 candidates to give ranking enough variety to work with.
+**Search** -- Filter active markets by liquidity, volume, and date range. When a user types a query, semantic search (`.text()`) finds markets by meaning -- searching "AI models" returns "GPT-5 release date", "Claude benchmarks", and "open-source AI" without any keyword hacks. When a wallet is connected and no query is active, boost results by that wallet's preferred topics and tags using `groupBoost`. Fetch 150 candidates to give ranking enough variety to work with.
 
 **Features** -- Compute ML signals for each candidate: semantic similarity to the user's interests, label matching, and recent trader bets on each market.
 
@@ -133,7 +133,7 @@ const results = await mbd.search()
   .execute();
 ```
 
-**Semantic search** (`.text()`) finds markets by meaning using vector similarity. Use this for user search queries -- it works far better than `.match()` for text search. Searching "iran" returns "US strikes Iran", "Iranian rials", "Iranian regime". Supports `.include()` and `.exclude()` filters but NOT `.sortBy()` or `.boost()`. Minimum 5 characters; pad short queries if needed.
+**Semantic search** (`.text()`) finds markets by meaning using vector similarity. Use this for user search queries -- it works far better than `.match()` for text search. Searching "AI models" returns "GPT-5 release date", "Claude benchmarks", "open-source AI". Supports `.include()` and `.exclude()` filters but NOT `.sortBy()` or `.boost()`. Minimum 5 characters; pad short queries if needed.
 
 **Boost search** is for personalization. When you add `.boost()` filters, results are ordered by relevance score instead of a sort field. `sortBy` and `boost` are mutually exclusive -- you use one or the other.
 
