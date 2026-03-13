@@ -2,7 +2,10 @@
   "name": "embed-ai",
   "version": "1.0.0",
   "description": "Integrate Embed's ML-powered recommendation APIs into crypto apps. Personalized feeds, trader rankings, smart notifications — powered by 130M+ onchain interactions.",
-  "author": "Embed",
+  "author": {
+    "name": "Embed",
+    "email": "hello@getembed.ai"
+  },
   "homepage": "https://getembed.ai",
   "repository": "https://github.com/ZKAI-Network/mbd_studio_demo"
 }
