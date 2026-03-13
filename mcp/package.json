@@ -1,0 +1,27 @@
+{
+  "name": "@embed-ai/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for Embed's recommendation APIs — personalized feeds, search, and semantic search for crypto apps",
+  "type": "module",
+  "bin": {
+    "embed-mcp": "./index.js"
+  },
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "keywords": ["mcp", "embed", "recommendations", "crypto", "polymarket", "farcaster"],
+  "license": "MIT",
+  "author": {
+    "name": "Embed",
+    "email": "hello@getembed.ai",
+    "url": "https://getembed.ai"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZKAI-Network/mbd_studio_demo"
+  }
+}
