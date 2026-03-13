@@ -1,17 +1,17 @@
 import 'dotenv/config';
 import { StudioConfig, StudioV1 } from 'mbd-studio-sdk';
 
-const apiKey = process.env.API_KEY;
+const apiKey = process.env.EMBED_API_KEY;
 const polymarketWallet = process.env.POLYMARKET_WALLET?.toLowerCase().trim();
 if (!apiKey || !polymarketWallet) {
-  throw new Error('API_KEY and POLYMARKET_WALLET must be set in .env file');
+  throw new Error('EMBED_API_KEY and POLYMARKET_WALLET must be set in .env file');
 }
 
 const config = new StudioConfig({ apiKey: apiKey });
 const mbd = new StudioV1({ config });
 
 const version = mbd.version();
-mbd.log('Using mbd SDK version '+version);
+mbd.log('Using Embed SDK version '+version);
 mbd.forUser("polymarket-wallets", polymarketWallet);
 
 const candidates = await mbd.search()

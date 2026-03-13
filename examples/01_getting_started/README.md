@@ -1,6 +1,6 @@
 # Getting Started — Polymarket Recommendations Demo
 
-This example shows how to use the MBD Studio SDK to build a personalized Polymarket prediction market feed. It demonstrates the full pipeline: search → features → scoring → ranking.
+This example shows how to use the Embed Pipeline SDK (`mbd-studio-sdk`) to build a personalized Polymarket prediction market feed. It demonstrates the full pipeline: search → features → scoring → ranking.
 
 ---
 
@@ -12,7 +12,7 @@ npm install
 
 This installs:
 
-- **mbd-studio-sdk** — MBD Studio backend client for search, features, scoring, and ranking
+- **mbd-studio-sdk** — Embed's pipeline SDK for search, features, scoring, and ranking
 - **dotenv** — Loads environment variables from `.env`
 
 ---
@@ -22,13 +22,13 @@ This installs:
 Create a `.env` file in this directory with your credentials:
 
 ```env
-API_KEY=your-mbd-api-key
+EMBED_API_KEY=your-api-key
 POLYMARKET_WALLET=0xYourPolymarketWalletAddress
 ```
 
 | Variable | Description |
 |----------|-------------|
-| `API_KEY` | Your MBD Studio API key |
+| `EMBED_API_KEY` | Your Embed API key (get one at [console.getembed.ai](https://console.getembed.ai)) |
 | `POLYMARKET_WALLET` | Polymarket wallet address used for personalization |
 
 Both are required. The script will throw an error if either is missing.
@@ -92,8 +92,8 @@ mbd.addCandidates(candidates);
   - `closed = true` — skip closed markets
   - `price_under05_or_over95 = true` — skip markets with extreme prices (too settled)
 - **Boosts (personalization):**
-  - `groupBoost` on `ai_labels_med` — boost items whose AI labels match the user’s labels (weights 1, 5, 10).
-  - `groupBoost` on `tags` — boost items whose tags match the user’s tags (weights 1, 5, 10).
+  - `groupBoost` on `ai_labels_med` — boost items whose AI labels match the user's labels (weights 1, 5, 10).
+  - `groupBoost` on `tags` — boost items whose tags match the user's tags (weights 1, 5, 10).
 
 Result: a candidate set of Polymarket items that pass filters and are boosted by user affinity.
 

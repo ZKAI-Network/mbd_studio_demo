@@ -1,12 +1,12 @@
-# mbd-studio-sdk — Help Desk Reference
+# Embed Pipeline SDK — Reference
 
 ## Introduction
 
-**mbd-studio-sdk** is an SDK for MBD Studio backend services: search, features, scoring, and ranking. It powers recommendation feeds (Polymarket, Farcaster, Zora, etc.).
+**mbd-studio-sdk** is the Embed Pipeline SDK for building recommendation pipelines: search, features, scoring, and ranking. It powers personalized feeds for Polymarket, Farcaster, Zora, and more.
 
 **Entry points:**
 - `import { StudioConfig, StudioV1 } from 'mbd-studio-sdk'`
-- Default API base: `https://api.mbd.xyz/v3/studio`
+- Default API base: `https://api.getembed.ai/v3/studio`
 
 **Typical flow:**
 1. `StudioConfig` → `Studio` (with apiKey)
