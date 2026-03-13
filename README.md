@@ -15,7 +15,7 @@ Install the Embed skill to give your AI agent access to on-chain intelligence:
 Or point any LLM at our machine-readable reference:
 
 ```
-curl https://getembed.ai/llms.txt
+curl https://raw.githubusercontent.com/ZKAI-Network/mbd_studio_demo/main/llms.txt
 ```
 
 ---
@@ -68,6 +68,7 @@ This repo is also an installable Claude Code plugin:
 │   └── embed-ai/
 │       ├── SKILL.md             # What the AI agent learns
 │       └── references/          # API docs, examples
+├── mcp/                         # MCP server (runtime tool access for agents)
 ├── llms.txt                     # Machine-readable reference for any LLM
 └── examples/                    # Working demos
 ```
