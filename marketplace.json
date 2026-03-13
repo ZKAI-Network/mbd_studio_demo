@@ -1,0 +1,11 @@
+{
+  "name": "embed-marketplace",
+  "description": "Official plugins from Embed — ML-powered recommendation APIs for crypto apps",
+  "plugins": [
+    {
+      "name": "embed-ai",
+      "description": "Integrate Embed's recommendation APIs into crypto apps. Personalized feeds, trader rankings, smart notifications — powered by 130M+ onchain interactions.",
+      "source": "ZKAI-Network/mbd_studio_demo"
+    }
+  ]
+}
