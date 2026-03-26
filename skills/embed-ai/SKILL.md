@@ -157,4 +157,4 @@ Use mbd-studio-sdk to search `polymarket-items` for active markets, score with `
 - Docs: https://docs.getembed.ai
 - API Reference: https://docs.getembed.ai/reference
 - Console: https://console.getembed.ai
-- GitHub: https://github.com/ZKAI-Network/mbd_studio_demo
+- GitHub: https://github.com/ZKAI-Network/embed-developer

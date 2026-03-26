@@ -15,7 +15,7 @@ Install the Embed skill to give your AI agent access to on-chain intelligence:
 Or point any LLM at our machine-readable reference:
 
 ```
-curl https://raw.githubusercontent.com/ZKAI-Network/mbd_studio_demo/main/llms.txt
+curl https://raw.githubusercontent.com/ZKAI-Network/embed-developer/main/llms.txt
 ```
 
 ---

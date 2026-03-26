@@ -11,7 +11,7 @@
       "description": "Integrate Embed's recommendation APIs into crypto apps. Personalized feeds, trader rankings, smart notifications — powered by 130M+ onchain interactions.",
       "source": {
         "source": "github",
-        "repo": "ZKAI-Network/mbd_studio_demo"
+        "repo": "ZKAI-Network/embed-developer"
       }
     }
   ]

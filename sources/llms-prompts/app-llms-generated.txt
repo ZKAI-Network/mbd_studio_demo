@@ -1,0 +1,505 @@
+# MBD Studio App – LLM Reference
+
+## Introduction
+
+This app is a **feed builder studio** for creating personalized content feeds. It has three main product modes:
+
+- **Build**: Search → Stories → Features → Scoring → Ranking → SDK
+- **Deploy**: Feed Algos → Feed Configs → Warmup
+- **Eval**: Dashboard
+
+**Main flow (Build)**:
+1. **Search**: Choose index (farcaster-items, farcaster-users, zora-coins, polymarket-items, polymarket-wallets, token-items, wallet-users, kalshi-items, kalshi-wallets-v20260315), run query (filter/sort, boost, semantic, AI prompt, ES query), get results.
+2. **Stories**: Generate stories (e.g. polymarket_v2).
+3. **Features**: Enrich hits with user-item features (user from farcaster-profiles, zora-profiles, polymarket-wallets).
+4. **Scoring**: Rerank with models (e.g. polymarket-rerank-v1).
+5. **Ranking**: Sort/diversity/limits on features/scores.
+6. **SDK**: Code editor runs mbd-studio-sdk; code is generated from last calls.
+
+**Key components**:
+- `App.js`: Product switcher (build/deploy/eval), step navigation.
+- `GlobalContext`: API key, base URL, account, currentContext (for help agent).
+- `BuildContext`: selectedIndex, search/stories/features/scoring/ranking APIs, hits, lastCall objects.
+- `DeployContext`: deployApi (algos, configs).
+- `EvalContext`: evalSteps.
+- `CardRouter`: Maps hit._index to FarcasterItemCard, ZoraCoinCard, PolymarketItemCard, PolymarketWalletCard, KalshiItemCard.
+
+---
+
+## Indices, Filters, and Field Names
+
+### farcaster-items
+**Sort fields**: `item_creation_timestamp`, `score_popular`, `score_trending`, `num_follower`, `score_reaction`, `item_id`
+**Term/terms fields (exact)**:
+`ai_labels_high|ai_labels_med|ai_labels_low`, `coin_labels`, `user_id`, `user_name`, `publication_type`, `channels`, `domains`, `app`, `lang`, `miniapp_categories`, `video_orientations`, `video_languages`
+**Match fields**: `text_enriched` (keywords)
+**Geo field**: `location` (values are `geo:lat,lon`)
+**Date field**: `item_creation_timestamp`
+**Numeric fields** (operators `>=`/`<=` in UI):
+`text_length` (item_features),
+`score_spam`, `user_score_spam`, `user_events_num`, `user_events_per_day`, `score_not_ok`, `user_warpcast_spam` (spam_moderation),
+`score_popular`, `score_trending`, `num_like`, `num_comment`, `num_share`, `num_follower` (social_filters),
+`score_like`, `score_share`, `score_comment`, `score_reaction` (beacon_models).
+**Lookup filters (terms_lookup)**:
+- `user_preferences`: lookup_index=`farcaster-users`, `field`=`ai_labels_med` OR `cluster_id`, `path` in `primary_labels|secondary_labels|primary_clusters|secondary_clusters`
+- `author_followed_by`: lookup_index=`farcaster-users`, `field`=`user_id`, `path`=`following_user_ids`
+**Blacklist (console_account)**:
+`user_id` with path `exclude_user_ids`, and `item_id` with path `exclude_item_ids` (console-accounts index)
+
+### farcaster-users
+**Sort fields**: `updated_at`, `events_per_day`, `score_spam`, `score_not_ok`
+**Term/terms fields (exact)**:
+`user_id`, `name`, `pseudonym` (user_ids)
+`primary_labels`, `secondary_labels` (ai_labels2)
+`primary_tags`, `secondary_tags` (tags2)
+**Date field (intended)**: `updated_at`
+**Numeric fields (intended)**: `events_per_day`, `score_spam`, `score_not_ok`
+**Tip**: `FilterTypeRouter` does not define a dedicated `farcaster-users` filter section like other indices; validate which filter chips actually render in the UI.
+
+### zora-coins
+**Sort fields**: `score_popular`, `score_trending`, `num_buy`, `num_sell`, `zora_market_cap`, `zora_price_in_usdc`, `zora_total_supply`, `zora_total_volume`, `zora_unique_holders`, `zora_volume_24h`, `num_follower`, `zora_created_at`, `zora_updated_at`, `last_interaction_timestamp`
+**Term/terms fields (exact)**:
+`ai_labels_high|ai_labels_med|ai_labels_low`, `publication_type`, `zora_media_content_type` (media_content_types),
+`domain`, `zora_creator_farcaster_id`, `user_name`, `active` (boolean_filters)
+**Match fields**: `zora_name`, `zora_description` (keywords)
+**Date fields**: `zora_created_at`, `zora_updated_at`, `last_interaction_timestamp`
+**IsNull/not_null**: `zora_media_content_type`, `zora_creator_farcaster_id`
+**Lookup filter (terms_lookup)**:
+- `author_followed_by`: lookup_index=`farcaster-users`, `field`=`zora_creator_farcaster_id`, `path`=`following_user_ids`
+**Numeric fields**:
+`zora_market_cap`, `zora_market_cap_delta_24h`, `zora_price_in_usdc`, `zora_total_supply`, `zora_total_volume`, `zora_unique_holders`, `zora_volume_24h` (market_info)
+plus spam_moderation numeric options from the spam filter UI.
+
+### polymarket-items
+**Sort fields**: `created_at`, `updated_at`, `liquidity`, `volume`, `volume_24hr`, `volume_1wk`, `volume_1mo`, `volume_1yr`, `one_hour_price_change_abs`, `one_day_price_change_abs`, `one_week_price_change_abs`, `one_month_price_change_abs`, `spread`
+**Term/terms fields (exact)**: `item_id`, `ai_labels_high|ai_labels_med|ai_labels_low`, `tags`
+**Match fields**: `question`, `description`
+**Date fields**: `start_date`, `end_date`, `game_start_time`
+**Boolean fields**: `featured`, `restricted`, `closed`, `price_under05_or_over95`, `price_0_or_1`
+**Numeric fields**: `liquidity`, `volume`, `volume_24hr`, `volume_1wk`, `volume_1mo`, `volume_1yr`, `span_days`,
+`one_hour_price_change`, `one_hour_price_change_abs`, `one_day_price_change`, `one_day_price_change_abs`,
+`one_week_price_change`, `one_week_price_change_abs`, `one_month_price_change`, `one_month_price_change_abs`
+**Wallet preference (terms_lookup)**:
+lookup_index=`polymarket-wallets`, `field`=`ai_labels_med`, `path`=`primary_labels|secondary_labels`, `value`=`wallet address`
+**Wallet boosting (group_boost, boost endpoint only)**:
+- lookup_index=`polymarket-wallets`, `field`=`ai_labels_med`, `group`=`label` (paths `label_01..label_n`)
+- lookup_index=`polymarket-wallets`, `field`=`tags`, `group`=`tag` (paths `tag_01..tag_n`)
+
+### polymarket-wallets
+**Sort fields**: `updated_at`, `pnl`, `volume`
+**Term/terms fields (exact)**: `user_id`, `name`, `pseudonym`, `primary_labels`, `secondary_labels`, `primary_tags`, `secondary_tags`
+**IsNull/not_null fields**: `name`, `pseudonym`, `pfp`, `primary_labels`, `secondary_labels`, `primary_similar_wallets`, `secondary_similar_wallets`, `text_vector`
+**Date field**: `updated_at`
+**Numeric fields**: `volume`, `pnl`, `events_per_day`
+
+### token-items
+**Sort fields**: `last_updated`, `market_cap`, `price_usd`, `price_diff_pct_1h`, `price_diff_pct_1d`, `volume_usd_1h`, `volume_usd_24h`, `circulating_supply`
+**Term/terms fields (exact)**: `item_id`, `token_address`, `symbol`, `chain`
+**Match field**: `name`
+**Date field**: `last_updated`
+**Numeric fields**: `market_cap`, `price_usd`, `price_diff_pct_1d`, `volume_usd_1h`, `volume_usd_24h`, `circulating_supply`, `decimals`
+
+### wallet-users
+**Sort fields**: `last_trade_timestamp`, `zerion_last_enriched_at`, `portfolio_total_usd`, `portfolio_cash_usd`, `portfolio_fungibles_usd`, `portfolio_nfts_usd`, `pnl_pct_total`, `pnl_net_invested_usd`, `pnl_realized_usd`, `pnl_unrealized_usd`, `volume_usd_24h`, `volume_usd_7d`, `volume_usd_30d`, `num_trades_24h`, `num_trades_30d`
+**Term/terms fields (exact)**: `wallet_address`, `chains`, `labels`, `tags`, `fungible_positions_tokens_list`
+**Date fields**: `last_trade_timestamp`, `zerion_last_enriched_at`
+**Numeric fields**:
+`allocation_cash_pct`, `allocation_fungibles_pct`, `allocation_nfts_pct`,
+`num_trades_24h`, `num_trades_30d`,
+`pnl_net_invested_usd`, `pnl_pct_total`, `pnl_realized_usd`, `pnl_unrealized_usd`,
+`portfolio_cash_usd`, `portfolio_fungibles_usd`, `portfolio_nfts_usd`, `portfolio_total_usd`,
+`volume_usd_24h`, `volume_usd_7d`, `volume_usd_30d`
+
+### kalshi-items
+**Sort fields**: `created_at`, `updated_at`, `volume`, `start_date`, `end_date`
+**Filterable fields (requested + other UI fields)**:
+Identifiers (term/terms): `item_id`, `event_id`, `ticker`
+AI labels (term/terms): `ai_labels_high`, `ai_labels_med`, `ai_labels_low`
+Tags/categories (term/terms): `tags`, `series_category`, `series_tags`
+Status (term/terms): `status`
+Date fields: `start_date`, `end_date`, `created_at`, `updated_at`
+Keywords (match): `question`, `description`
+Boolean fields: `active`, `closed`
+Numeric fields: `volume`
+**Boosting (boost endpoint only, via group_boost)**:
+lookup_index=`kalshi-wallets`, `value`=`wallet doc id`, and:
+`field`=`ai_labels_med` with `group`=`label`, OR `field`=`tags` with `group`=`tag`.
+**Must-include fields**: `tags`, `series_category`, `series_tags`, `status`, `ticker`, `event_id`.
+
+### kalshi-wallets-v20260315
+**Sort fields**: `updated_at`, `last_trade_time`, `pnl`, `volume_quote`, `volume_outcome`, `markets_traded`, `events_per_day`
+**Term/terms fields (exact)**: `user_id`, `primary_labels`, `secondary_labels`, `primary_tags`, `secondary_tags`
+**IsNull/not_null fields**: `primary_labels`, `secondary_labels`, `primary_tags`, `secondary_tags`, `text_vector`, `sem_embed`, `protocol`
+**Date fields**: `updated_at`, `last_trade_time`
+**Numeric fields**: `pnl`, `volume_quote`, `volume_outcome`, `markets_traded`, `events_per_day`
+
+---
+
+## Source Code (Compact, Layout + Event Logic)
+
+### App.js
+```javascript
+const AppProviders = ({ children }) => (
+  <GlobalProvider>
+    <BuildProvider>
+      <DeployProvider>
+        <EvalProvider>{children}</EvalProvider>
+      </DeployProvider>
+    </BuildProvider>
+  </GlobalProvider>
+);
+
+const BuildContent = ({ activeStep }) => {
+  switch (activeStep) {
+    case 0: return <SearchService />;
+    case 1: return <StoriesService />;
+    case 2: return <FeaturesService />;
+    case 3: return <ScoringService />;
+    case 4: return <RankingService />;
+    case 5: return <FeedBuilder />;
+    default: return null;
+  }
+};
+
+const DeployContent = ({ activeStep }) => {
+  switch (activeStep) {
+    case 0: return <FeedsService />;
+    case 1: return <FeedConfigsService />;
+    case 2: return <WarmupService />;
+    default: return null;
+  }
+};
+
+const EvalContent = ({ activeStep }) => {
+  if (activeStep === 0) return <DashboardPage />;
+  return null;
+};
+
+const AppContent = () => {
+  const { activeProduct, setActiveProduct } = useProduct();
+  const { buildSteps } = useBuild();
+  const { deploySteps } = useDeploy();
+  const { evalSteps } = useEval();
+  const [activeStep, setActiveStepState] = useState(0);
+  const steps = activeProduct === 'build' ? buildSteps : activeProduct === 'deploy' ? deploySteps : evalSteps;
+
+  // Tip: step navigation is guarded by `step.enabled`
+  const setActiveStep = useCallback((step) => {
+    const stepConfig = steps[step];
+    if (stepConfig?.enabled) setActiveStepState(step);
+  }, [steps]);
+
+  // Switching product resets the flow to step 0
+  const handleProductChange = useCallback((product) => {
+    setActiveProduct(product);
+    setActiveStepState(0);
+  }, [setActiveProduct]);
+
+  const renderContent = () => {
+    if (activeProduct === 'build') return <BuildContent activeStep={activeStep} />;
+    if (activeProduct === 'deploy') return <DeployContent activeStep={activeStep} />;
+    if (activeProduct === 'eval') return <EvalContent activeStep={activeStep} />;
+    return null;
+  };
+
+  // Layout: AppBar + active step content
+  return (
+    <>
+      <AppBar
+        activeProduct={activeProduct}
+        setActiveProduct={handleProductChange}
+        activeStep={activeStep}
+        setActiveStep={setActiveStep}
+        steps={steps}
+      />
+      {renderContent()}
+    </>
+  );
+};
+
+function App() {
+  return (
+    <NeynarContextProvider
+      settings={{
+        clientId: "9af4d2c3-218f-4ce6-8cc8-5024d0065e28",
+        defaultTheme: Theme.Light,
+        eventsCallbacks: {
+          onAuthSuccess: () => {},
+          onSignout: () => {},
+          onError: (error) => {},
+        },
+      }}
+    >
+      <AppProviders><AppContent /></AppProviders>
+    </NeynarContextProvider>
+  );
+}
+export default App;
+```
+
+### indexUtils.js
+```javascript
+const findIndex = (index) => {
+  const options = ['farcaster-items','zora-coins','polymarket-items','polymarket-wallets','kalshi-items'];
+  for (const opt of options) if (index.startsWith(opt)) return opt;
+  return null;
+};
+export { findIndex };
+```
+
+### contexts/GlobalContext.js
+```javascript
+// Holds: apiKey, baseServiceUrl, accountId, defaultFarcasterUserId, defaultPolymarketWalletAddress,
+// currentContext (for help agent), activeProduct, setActiveProduct, mergeCurrentContext, setCurrentContext
+// Auth: loginToken, userData, loginSuccess, logout
+```
+
+### contexts/BuildContext.js
+```javascript
+// selectedIndex, searchApi (generateFilterSortCandidates, generateBoostCandidates, generateSemanticSearchCandidates,
+// generateEsQueryCandidates, generateAiPromptQuery, lookupDocument), storiesApi, featuresApi, scoringApi, rankingApi, feedBuilderApi
+// searchResults, searchLastCall, storiesResults, featuresResults, scoringResults, rankingResults, hits, setHits
+// buildSteps: [{label,enabled}] - Search,Stories,Features,Scoring,Ranking,SDK. Features/Scoring/Ranking enabled when hits exist and features/scores available
+// apiCall, fetchCachedList, clearResults, updateSelectedIndex
+```
+
+### contexts/DeployContext.js
+```javascript
+// deployApi: listFeedAlgos, getFeedAlgo, createFeedAlgo, updateFeedAlgo, deleteFeedAlgo,
+// listFeedConfigs, getFeedConfig, createFeedConfig, updateFeedConfig, deleteFeedConfig,
+// serveTest, serveFeedPage, serveNewItems, clearCache
+// deploySteps: Algos, Configs, Warmup
+```
+
+### contexts/EvalContext.js
+```javascript
+// evalSteps: [{ label: 'Dashboard', enabled: true }]
+```
+
+### components/AppBar.js
+```javascript
+// PRODUCTS: ['build','deploy','eval']
+// ProductBadge per product; ButtonGroup for steps (disabled when !step.enabled)
+// IconButtons: Help (QuizIcon), Webhook (open_api_specs), Settings, Account
+// Modals: SettingsModal, AuthApiKey/AuthLogin (AUTH_MODE), HelpPanel
+// onClick product -> setActiveProduct; onClick step -> setActiveStep
+```
+
+### pages/SearchService.js
+```javascript
+// indexOptions: farcaster-items, zora-coins, polymarket-items, polymarket-wallets, kalshi-items
+// Grid: Select (index) | QueryColumn | ResultsColumn | InfoColumn
+// setCurrentContext({ product:'build', page:'search', source: selectedIndex })
+// mergeCurrentContext({ numSearchResults, totalSearchHits }) from searchResults
+// handleIndexChange -> updateSelectedIndex
+```
+
+### search/QueryColumn.js
+```javascript
+// Routes selectedIndex to: FarcasterItemsQuery, ZoraCoinsQuery, PolymarketItemsQuery, PolymarketWalletsQuery, KalshiItemsQuery
+```
+
+### search/QueryModes.js
+```javascript
+// queryModes: filter_sort, boost, semantic, ai_prompt, es_query
+// mergeCurrentContext({ queryMode, sortOptions, strictFilterTypeOptions, boostFilterTypeOptions, source })
+// Renders: FilterSortQuery, BoostQuery, SemanticSearchQuery, AIPromptQuery, ESQueryQuery
+```
+
+### search/FilterSortQuery.js
+```javascript
+// State: selectedFilterType, includeFilters, excludeFilters, size, sortBy, sortOrder
+// FilterTypeRouter filterType, boostInput=false, onUpdate, source
+// handleFilterUpdateWrapper -> handleFilterUpdate(updateData, includeFilters, excludeFilters, setIncludeFilters, setExcludeFilters)
+// handleExecuteQuery -> searchApi.generateFilterSortCandidates({ size, sort_by: {field,order}, include, exclude })
+```
+
+### search/BoostQuery.js
+```javascript
+// State: selectedFilterType, includeFilters, excludeFilters, boostFilters, size
+// FilterTypeRouter boostInput=true
+// handleExecuteQuery -> searchApi.generateBoostCandidates({ size, include, exclude, boost })
+```
+
+### search/SemanticSearchQuery.js
+```javascript
+// State: searchQuery
+// handleExecuteQuery -> searchApi.generateSemanticSearchCandidates({ text })
+```
+
+### search/AIPromptQuery.js
+```javascript
+// State: prompt, generatedQuery, showQueryPreview, feedback, errorMessage
+// handleGenerateQuery -> searchApi.generateAiPromptQuery(prompt) -> setGeneratedQuery(es_query), setFeedback
+// handleExecuteQuery -> searchApi.generateEsQueryCandidates({ query: JSON.parse(generatedQuery) })
+```
+
+### search/ESQueryQuery.js
+```javascript
+// State: queryJson (example: bool.must.terms.publication_type, sort.score_trending)
+// handleExecuteQuery -> searchApi.generateEsQueryCandidates({ query: JSON.parse(queryJson) })
+// validateJson, handleFormatJson
+```
+
+### filters/FilterTypeRouter.js
+```javascript
+// Routes filterType + source to section components. source-specific: farcaster-items, zora-coins, polymarket-items, polymarket-wallets, kalshi-items
+// Standard: publication_types, media_content_types, ai_labels, ai_labels2, spam_moderation, channels, item_ids, coin_labels, apps, languages, locations, miniapps, video, tags, tags2, custom_json
+// farcaster: date(item_creation_timestamp), keywords(text_enriched), item_features, social_filters, beacon_models, user_preferences, blacklist, domains(domains), authors, author_followed_by(user_id)
+// zora: date(zora_created_at,zora_updated_at,last_interaction_timestamp), keywords(zora_name,zora_description), domains(domain), authors(ZoraAuthorSection), author_followed_by(zora_creator_farcaster_id), boolean_filters(active), is_null(zora_media_content_type,zora_creator_farcaster_id), market_info
+// polymarket-items: date(start_date,end_date,game_start_time), boolean_filters(featured,restricted,closed,...), keywords(question,description), numeric_filters, wallet_prefs1, boost_wallet_labels, boost_wallet_tags
+// polymarket-wallets: user_ids(user_id,name,pseudonym), is_null(name,pseudonym,pfp,...), date(updated_at), numeric_filters(volume,pnl,events_per_day)
+// kalshi-items: date(start_date,end_date,created_at,updated_at), boolean_filters(active,closed), keywords(question,description), numeric_filters(volume)
+```
+
+### search/filterUtils.js
+```javascript
+// handleFilterUpdate(updateData, includeFilters, excludeFilters, setIncludeFilters, setExcludeFilters, boostFilters?, setBoostFilters?)
+// updateData: { action:'include'|'exclude'|'boost', filter, field, value, label, boost? }
+// terms/geo: merge values into existing filter by field; else add new filter (dedupe by JSON)
+```
+
+### search/FilterListSection.js
+```javascript
+// getChipLabel(filter): term->field:value, terms->field:val1,val2, numeric->field op value, date->field from/to, is_null/not_null, custom->{custom json}, match, geo, group_boost, terms_lookup, console_account
+// Renders Chip per filter with onDelete
+```
+
+### search/ResultsColumn.js
+```javascript
+// Uses searchResults, isLoading from useBuild()
+// Renders: loading spinner | empty | ResultsList(hits)
+```
+
+### search/InfoColumn.js
+```javascript
+// Shows total_hits, fetched hits, took_es, took_backend, took_frontend, max_score
+// Buttons: Backend Call (searchLastCall), View ES Query (searchResults?.query)
+// QueryDialog, BackendCallDialog
+```
+
+### components/ResultsList.js
+```javascript
+// Pagination (ITEMS_PER_PAGE=10), maps hits to CardRouter(hit)
+```
+
+### cards/CardRouter.js
+```javascript
+// componentMap: farcaster-items->FarcasterItemCard, zora-coins->ZoraCoinCard, polymarket-items->PolymarketItemCard, polymarket-wallets->PolymarketWalletCard, kalshi-items->KalshiItemCard
+// findCardComponent(hit._index) via index.startsWith(key)
+```
+
+### pages/StoriesService.js
+```javascript
+// engineOptions: polymarket_v2
+// Grid: Select(engine) | StoriesQueryColumn | StoriesResultsColumn | StoriesInfoColumn
+// setCurrentContext({ product:'build', page:'stories', engine })
+```
+
+### stories/StoriesQueryColumn.js
+```javascript
+// selectedEngine -> ParamsPolymarketV1/V2; handleGenerateStories -> storiesApi.generateStories(engine, params)
+```
+
+### pages/FeaturesService.js
+```javascript
+// Grid: FeaturesQueryColumn | EnrichedResultsColumn | FeaturesInfoColumn
+// setCurrentContext({ product:'build', page:'features', numCandidates })
+```
+
+### features/FeaturesQueryColumn.js
+```javascript
+// version (v1), userType (farcaster-profiles, zora-profiles, polymarket-wallets), userId
+// payload: { user: { index, id }, items: hits.map(h=>{index,id}) }
+// featuresApi.getFeatures(version, payload) -> merge features/scores/info into hits
+```
+
+### pages/ScoringService.js
+```javascript
+// Grid: ScoringQueryColumn | EnrichedResultsColumn | ScoringInfoColumn
+```
+
+### scoring/ScoringQueryColumn.js
+```javascript
+// AVAILABLE_MODELS: rerank_polymkt1 -> /scoring/ranking_model/polymarket-rerank-v1
+// userId (defaultPolymarketWalletAddress)
+// payload: { user_id, item_ids }
+// scoringApi.getScores(endpoint, payload) -> ranked list -> convert to scores -> hit._scores[modelName]
+```
+
+### pages/RankingService.js
+```javascript
+// Grid: RankingQueryColumn | EnrichedResultsColumn | RankingInfoColumn
+```
+
+### ranking/RankingQueryColumn.js
+```javascript
+// Steps: SortingStep, DiversityStep, LimitsByFieldStep; availableFields = features + scores from getAvailableData(hits)
+// Payload: items (item_id + usefulFields from _features/_scores, embed if diversity semantic), sort, diversity, limits_by_field
+// rankingApi.rankFeed(payload) -> result.items -> hit._ranking_score
+```
+
+### features_utils.js
+```javascript
+// getAvailableData(hits) -> { features: sorted keys from _features, scores: keys from _scores, ranking: bool }
+// preferredColumns for sort order
+```
+
+### pages/FeedBuilder.js
+```javascript
+// code = generateCode(searchLastCall, featuresLastCall, scoringLastCall, rankingLastCall)
+// Tabs: Results | Logs; CodeEditor(initialCode), FeedResults(data)
+// mergeCurrentContext({ sdkTab })
+```
+
+### feed_builder/code_generator.js
+```javascript
+// convertSearchCall: filter_and_sort/boost -> .include()/.exclude()/.boost() + filterToSdkCall; es_query -> .esQuery(); semantic -> .text()/.vector()
+// filterToSdkCall: term, terms, numeric, date, match, geo, is_null, not_null, custom, group_boost, terms_lookup, console_account
+// convertFeaturesCall, convertScoringCall (scoreKey from endpoint), convertRankingCall (sort, diversity, limits_by_field)
+// getUserFromLastCalls -> forUser(index, id)
+// generateCode -> mbd.forUser, search, features, scoring, ranking, mbd.show()
+```
+
+### feed_builder/CodeEditor.js
+```javascript
+// CodeMirror (javascript), feedType (algorithm|minifeed), feedInputs (none|user_id), sdkVersion, farcasterFid, polymarketWallet
+// handleRun: Studio + AsyncFunction(mbd, farcasterFid, polymarketWallet), run in frontend
+// handleValidate: feedBuilderApi.validateFeed(code, sdkVersion, feedType, feedInputs) -> syntax_check, security_check, signature
+// handleRunBackend: feedBuilderApi.runFeed({ sdk_version, feed_type, feed_inputs, farcasterFid, polymarketWallet, algorithm, signature, return_log })
+// Signed feed dialog: ShowJsonDialog with algorithm + signature
+```
+
+### pages/FeedsService.js
+```javascript
+// Grid: FeedAlgoExplorerColumn | FeedAlgoEditorColumn
+// editingFeed, refreshKey; onSaved, onDeleteFeed, onClearEdit
+// deployApi: listFeedAlgos, create/update/delete
+```
+
+### pages/FeedConfigsService.js
+```javascript
+// Grid: ConfigExplorerColumn | ConfigEditorColumn
+// editingConfig, deployApi for configs
+```
+
+### pages/WarmupService.js
+```javascript
+// Placeholder: "Coming soon"
+```
+
+### pages/DashboardPage.js
+```javascript
+// Placeholder: "Coming soon"
+```
+
+---
+
+## Tips for LLMs
+
+1. **Index selection**: `selectedIndex` in BuildContext drives QueryColumn routing and filter options. Use `findIndex(hit._index)` when index may have a version suffix.
+2. **Filter payload shape**: Filters use `{ filter, field, value, label, boost? }`. Filter types: term, terms, numeric, date, match, geo, is_null, not_null, custom, group_boost, terms_lookup, console_account.
+3. **Search endpoints**: `/search/filter_and_sort`, `/search/boost`, `/search/semantic`, `/search/es_query`, `/search/ai_prompt`. Payload includes `index`, `origin: 'frontend'`, `feed_type`, `include_vector`.
+4. **Hits enrichment**: Features and scores are merged into `hit._features` and `hit._scores`. Ranking writes `hit._ranking_score`. `getAvailableData(hits)` returns available feature and score keys.
+5. **SDK code generation**: `code_generator.js` turns lastCall objects into mbd-studio-sdk chains. User context comes from features or scoring payload.
+6. **currentContext**: Used by HelpPanel; includes product, page, source, queryBeingBuilt, numCandidates, etc.

@@ -12,13 +12,13 @@ privacy:
 
 **Resources:**
 - [Blog post](https://getembed.ai/blog/vibecoding-polymarket-feed) - How the pipeline works and what each prompt does
-- [Example repo](https://github.com/ZKAI-Network/mbd_studio_demo/tree/main/examples/02_polymarket_feed) - Full source code for the finished app
-- [SDK docs (llms.txt)](https://github.com/ZKAI-Network/mbd_studio_demo/blob/main/llms.txt) - Full `mbd-studio-sdk` API reference — feed this to your LLM
+- [Example repo](https://github.com/ZKAI-Network/embed-developer/tree/main/examples/02_polymarket_feed) - Full source code for the finished app
+- [SDK docs (llms.txt)](https://github.com/ZKAI-Network/embed-developer/blob/main/llms.txt) - Full `mbd-studio-sdk` API reference — feed this to your LLM
 - [Embed Console](https://console.mbd.xyz) - Sign up and grab your API key (starts with `mbd-`)
 
 ---
 
-Copy the prompt below into your AI coding assistant along with the [llms.txt](https://github.com/ZKAI-Network/mbd_studio_demo/blob/main/llms.txt). The SDK reference covers all builder methods; this prompt adds the Polymarket-specific context the LLM needs.
+Copy the prompt below into your AI coding assistant along with the [llms.txt](https://github.com/ZKAI-Network/embed-developer/blob/main/llms.txt). The SDK reference covers all builder methods; this prompt adds the Polymarket-specific context the LLM needs.
 
 ````text
 Build a personalized Polymarket prediction markets feed as a Next.js 15 App Router app (TypeScript, Tailwind 4, TanStack Query v5, Framer Motion, lucide-react). Use `mbd-studio-sdk` for the recommendation pipeline (see the attached llms.txt for the full SDK API). Use `liveline` for canvas-rendered price sparklines. Store the API key in .env.local as MBD_API_KEY.

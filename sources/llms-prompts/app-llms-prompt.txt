@@ -1,0 +1,9 @@
+In @ds_frontend/app/llms.txt, concatenate of all source code in the app @ds_frontend/app/src/App.js 
+
+* Add an introduction block in the beginning with an overall description of the app and its main components.
+* Add a detailed list of indices available for search, plus the filters and field names that can be used in each context.
+* For kalshi-items, include tags, series_category, series_tags, status, ticker, and event_id in the filterable fields list.
+* Make code as compact as possible.
+* Drop imports and styling aspects, but keep layout and event logic.
+* Decide on the best order to present the files to optimize LLMs performance.
+* Add useful comments and tips that can be helpful to understand the app.

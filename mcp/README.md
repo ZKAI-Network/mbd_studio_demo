@@ -33,7 +33,7 @@ Add to your Claude Code MCP config (`~/.claude/mcp.json`):
   "mcpServers": {
     "embed-ai": {
       "command": "node",
-      "args": ["/path/to/mbd_studio_demo/mcp/index.js"],
+      "args": ["/path/to/embed-developer/mcp/index.js"],
       "env": {
         "EMBED_API_KEY": "your-api-key"
       }
