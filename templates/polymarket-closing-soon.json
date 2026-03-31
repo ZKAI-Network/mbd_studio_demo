@@ -1,0 +1,72 @@
+{
+  "id": "polymarket-closing-soon",
+  "name": "Markets Closing Soon",
+  "description": "Prediction markets approaching their resolution date — the final window to take a position. Sorted by closest end date, filtered for minimum volume and liquidity so you only surface markets with real trading activity. Excludes recurring micro-markets (5-minute price-direction bets) to focus on substantive events. Diversity by category ensures a mix of sports, politics, crypto, and culture.",
+  "category": "prediction-markets",
+  "index": "polymarket-items",
+  "difficulty": "beginner",
+  "pipeline": {
+    "search": {
+      "endpoint": "/v3/studio/search/filter_and_sort",
+      "config": {
+        "index": "polymarket-items",
+        "size": 150,
+        "sort_by": { "field": "end_date", "order": "asc" },
+        "include": [
+          { "filter": "numeric", "field": "liquidity_num", "operator": ">=", "value": 5000 },
+          { "filter": "numeric", "field": "volume_24hr", "operator": ">=", "value": 500 },
+          { "filter": "numeric", "field": "span_days", "operator": ">=", "value": 7 }
+        ],
+        "exclude": [
+          { "filter": "term", "field": "closed", "value": true },
+          { "filter": "term", "field": "archived", "value": true },
+          { "filter": "term", "field": "price_0_or_1", "value": true }
+        ],
+        "select_fields": ["question", "liquidity_num", "volume_24hr", "end_date", "last_trade_price", "spread", "tags", "outcome_prices", "span_days"]
+      }
+    },
+    "features": {
+      "endpoint": "/v3/studio/features/v1",
+      "config": {
+        "features": ["topic_score", "user_affinity_score"]
+      }
+    },
+    "scoring": {
+      "endpoint": "/v3/studio/scoring/ranking_model/polymarket-rerank-v1",
+      "config": {}
+    },
+    "ranking": {
+      "endpoint": "/v3/studio/ranking/feed",
+      "config": {
+        "sort": {
+          "method": "mix",
+          "fields": [
+            { "field": "topic_score", "percentage": 0.35 },
+            { "field": "user_affinity_score", "percentage": 0.35 },
+            { "field": "rerank_score", "percentage": 0.3 }
+          ]
+        },
+        "diversity": {
+          "method": "fields",
+          "field": "ai_labels_med"
+        },
+        "limits_by_field": {
+          "field": "ai_labels_med",
+          "max": 2,
+          "window": 6
+        }
+      }
+    }
+  },
+  "algo_dsl_code": "// Algo runtime provides: mbd (StudioV1), polymarketWallet (string)\nmbd.forUser('polymarket-wallets', polymarketWallet);\n\n// 1. Search: Markets closing soonest, with real activity, no micro-markets\nconst searchResults = await mbd.search()\n  .index('polymarket-items')\n  .size(150)\n  .includeVectors(true)\n  .include()\n    .numeric('liquidity_num', '>=', 5000)\n    .numeric('volume_24hr', '>=', 500)\n    .numeric('span_days', '>=', 7)\n  .exclude()\n    .term('closed', true)\n    .term('archived', true)\n    .term('price_0_or_1', true)\n  .sortBy('end_date', 'asc')\n  .execute();\n\nmbd.addCandidates(searchResults);\nmbd.log('Found ' + searchResults.length + ' markets closing soon');\n\n// 2. Features: Enrich with user-item signals\nconst featuresResult = await mbd.features('v1').execute();\nmbd.addFeatures(featuresResult);\n\n// 3. Scoring: ML reranking\nconst scoringResult = await mbd.scoring()\n  .model('/scoring/ranking_model/polymarket-rerank-v1')\n  .execute();\nmbd.addScores(scoringResult, 'rerank_score');\n\n// 4. Ranking: Balanced mix + category diversity (round-robin)\nconst rankingResult = await mbd.ranking()\n  .sortingMethod('mix')\n  .mix('topic_score', 'desc', 0.35)\n  .mix('user_affinity_score', 'desc', 0.35)\n  .mix('rerank_score', 'desc', 0.3)\n  .diversity('fields')\n  .fields(['ai_labels_med'])\n  .limitByField()\n  .every(6)\n  .limit('ai_labels_med', 2)\n  .execute();\nmbd.addRanking(rankingResult);\n\nmbd.show(mbd.getFeed());",
+  "curl_example": "curl -X POST https://api.mbd.xyz/v3/studio/search/filter_and_sort \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer mbd-YOUR_API_KEY\" \\\n  -d '{\n    \"index\": \"polymarket-items\",\n    \"size\": 150,\n    \"sort_by\": { \"field\": \"end_date\", \"order\": \"asc\" },\n    \"include\": [\n      { \"filter\": \"numeric\", \"field\": \"liquidity_num\", \"operator\": \">=\", \"value\": 5000 },\n      { \"filter\": \"numeric\", \"field\": \"volume_24hr\", \"operator\": \">=\", \"value\": 500 },\n      { \"filter\": \"numeric\", \"field\": \"span_days\", \"operator\": \">=\", \"value\": 7 }\n    ],\n    \"exclude\": [\n      { \"filter\": \"term\", \"field\": \"closed\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"archived\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"price_0_or_1\", \"value\": true }\n    ],\n    \"select_fields\": [\"question\", \"liquidity_num\", \"volume_24hr\", \"end_date\", \"last_trade_price\", \"spread\", \"tags\"]\n  }'",
+  "customization_hints": [
+    "Raise volume_24hr threshold (e.g. 10000) to only show markets with active last-minute trading",
+    "Raise liquidity_num to 50000 to focus on high-stakes markets only",
+    "Reduce span_days to 1 to include short-lived daily markets, or raise to 30 to only show longer-running events",
+    "Switch diversity method to 'semantic' with lambda 0.5 if category round-robin feels too rigid",
+    "Add price_under05_or_over95 exclusion if you only want genuinely contested markets (removes near-settled ones at 3¢ or 97¢)"
+  ],
+  "docs_link": "https://docs.getembed.ai/docs/search",
+  "tags": ["polymarket", "prediction-markets", "closing-soon", "expiring", "time-sensitive"]
+}

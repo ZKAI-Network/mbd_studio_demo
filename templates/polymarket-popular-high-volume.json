@@ -1,0 +1,71 @@
+{
+  "id": "polymarket-popular-high-volume",
+  "name": "Popular High Volume Markets",
+  "description": "The biggest, most actively traded prediction markets — sorted by 24-hour volume with high liquidity floors to ensure quality. Designed as a 'what's hot right now' feed with aggressive diversity enforcement so each scroll brings a different topic, not 10 variants of the same election question.",
+  "category": "prediction-markets",
+  "index": "polymarket-items",
+  "difficulty": "beginner",
+  "pipeline": {
+    "search": {
+      "endpoint": "/v3/studio/search/filter_and_sort",
+      "config": {
+        "index": "polymarket-items",
+        "size": 200,
+        "sort_by": { "field": "volume_24hr", "order": "desc" },
+        "include": [
+          { "filter": "numeric", "field": "liquidity_num", "operator": ">=", "value": 50000 },
+          { "filter": "numeric", "field": "volume_24hr", "operator": ">=", "value": 25000 }
+        ],
+        "exclude": [
+          { "filter": "term", "field": "closed", "value": true },
+          { "filter": "term", "field": "archived", "value": true },
+          { "filter": "term", "field": "price_0_or_1", "value": true }
+        ],
+        "select_fields": ["question", "liquidity_num", "volume_24hr", "volume_num", "last_trade_price", "spread", "tags", "outcome_prices"]
+      }
+    },
+    "features": {
+      "endpoint": "/v3/studio/features/v1",
+      "config": {
+        "features": ["topic_score", "user_affinity_score"]
+      }
+    },
+    "scoring": {
+      "endpoint": "/v3/studio/scoring/ranking_model/polymarket-rerank-v1",
+      "config": {}
+    },
+    "ranking": {
+      "endpoint": "/v3/studio/ranking/feed",
+      "config": {
+        "sort": {
+          "method": "mix",
+          "fields": [
+            { "field": "topic_score", "percentage": 0.3 },
+            { "field": "user_affinity_score", "percentage": 0.3 },
+            { "field": "rerank_score", "percentage": 0.4 }
+          ]
+        },
+        "diversity": {
+          "method": "semantic",
+          "lambda": 0.3
+        },
+        "limits_by_field": {
+          "field": "ai_labels_med",
+          "max": 2,
+          "window": 10
+        }
+      }
+    }
+  },
+  "algo_dsl_code": "// Algo runtime provides: mbd (StudioV1), polymarketWallet (string)\nmbd.forUser('polymarket-wallets', polymarketWallet);\n\n// 1. Search: Top markets by volume with strong liquidity\nconst searchResults = await mbd.search()\n  .index('polymarket-items')\n  .size(200)\n  .includeVectors(true)\n  .include()\n    .numeric('liquidity_num', '>=', 50000)\n    .numeric('volume_24hr', '>=', 25000)\n  .exclude()\n    .term('closed', true)\n    .term('archived', true)\n    .term('price_0_or_1', true)\n  .sortBy('volume_24hr', 'desc')\n  .execute();\n\nmbd.addCandidates(searchResults);\nmbd.log('Found ' + searchResults.length + ' popular high-volume markets');\n\n// 2. Features: Enrich with user-item signals\nconst featuresResult = await mbd.features('v1').execute();\nmbd.addFeatures(featuresResult);\n\n// 3. Scoring: ML reranking\nconst scoringResult = await mbd.scoring()\n  .model('/scoring/ranking_model/polymarket-rerank-v1')\n  .execute();\nmbd.addScores(scoringResult, 'rerank_score');\n\n// 4. Ranking: Lean on rerank score + aggressive diversity\nconst rankingResult = await mbd.ranking()\n  .sortingMethod('mix')\n  .mix('topic_score', 'desc', 0.3)\n  .mix('user_affinity_score', 'desc', 0.3)\n  .mix('rerank_score', 'desc', 0.4)\n  .diversity('semantic')\n  .lambda(0.3)\n  .limitByField()\n  .every(10)\n  .limit('ai_labels_med', 2)\n  .execute();\nmbd.addRanking(rankingResult);\n\nmbd.show(mbd.getFeed());",
+  "curl_example": "curl -X POST https://api.mbd.xyz/v3/studio/search/filter_and_sort \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer mbd-YOUR_API_KEY\" \\\n  -d '{\n    \"index\": \"polymarket-items\",\n    \"size\": 200,\n    \"sort_by\": { \"field\": \"volume_24hr\", \"order\": \"desc\" },\n    \"include\": [\n      { \"filter\": \"numeric\", \"field\": \"liquidity_num\", \"operator\": \">=\", \"value\": 50000 },\n      { \"filter\": \"numeric\", \"field\": \"volume_24hr\", \"operator\": \">=\", \"value\": 25000 }\n    ],\n    \"exclude\": [\n      { \"filter\": \"term\", \"field\": \"closed\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"archived\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"price_0_or_1\", \"value\": true }\n    ],\n    \"select_fields\": [\"question\", \"liquidity_num\", \"volume_24hr\", \"volume_num\", \"last_trade_price\", \"spread\", \"tags\"]\n  }'",
+  "customization_hints": [
+    "Lower liquidity_num to 25000 and volume_24hr to 10000 to include mid-tier markets during quieter periods",
+    "Add a terms filter on tags to restrict to specific categories (e.g. ['Sports', 'Crypto'])",
+    "Increase diversity lambda to 0.6 if users prefer seeing related markets clustered together",
+    "Reduce limits_by_field max to 1 per window for maximum topic variety",
+    "Add a numeric filter on volume_num >= 1000000 to only show markets with massive all-time volume"
+  ],
+  "docs_link": "https://docs.getembed.ai/docs/search",
+  "tags": ["polymarket", "prediction-markets", "popular", "high-volume", "trending"]
+}

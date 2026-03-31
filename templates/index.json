@@ -1,0 +1,28 @@
+{
+  "templates": [
+    {
+      "id": "polymarket-volatile-markets",
+      "name": "Highly Volatile Markets",
+      "file": "polymarket-volatile-markets.json",
+      "category": "prediction-markets",
+      "difficulty": "beginner",
+      "tags": ["polymarket", "volatile", "price-movement", "trading"]
+    },
+    {
+      "id": "polymarket-closing-soon",
+      "name": "Markets Closing Soon",
+      "file": "polymarket-closing-soon.json",
+      "category": "prediction-markets",
+      "difficulty": "beginner",
+      "tags": ["polymarket", "closing-soon", "expiring", "time-sensitive"]
+    },
+    {
+      "id": "polymarket-popular-high-volume",
+      "name": "Popular High Volume Markets",
+      "file": "polymarket-popular-high-volume.json",
+      "category": "prediction-markets",
+      "difficulty": "beginner",
+      "tags": ["polymarket", "popular", "high-volume", "trending"]
+    }
+  ]
+}

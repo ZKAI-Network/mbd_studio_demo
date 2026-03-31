@@ -1,0 +1,72 @@
+{
+  "id": "polymarket-volatile-markets",
+  "name": "Highly Volatile Markets",
+  "description": "Prediction markets with the most price movement — markets where odds are actively shifting, signaling new information or contested outcomes. Sorted by absolute 24-hour price change, filtered for sufficient liquidity, and with diversity enforcement so you don't get 10 variants of the same Bitcoin target price.",
+  "category": "prediction-markets",
+  "index": "polymarket-items",
+  "difficulty": "beginner",
+  "pipeline": {
+    "search": {
+      "endpoint": "/v3/studio/search/filter_and_sort",
+      "config": {
+        "index": "polymarket-items",
+        "size": 150,
+        "sort_by": { "field": "one_day_price_change_abs", "order": "desc" },
+        "include": [
+          { "filter": "numeric", "field": "liquidity_num", "operator": ">=", "value": 15000 },
+          { "filter": "numeric", "field": "volume_24hr", "operator": ">=", "value": 5000 }
+        ],
+        "exclude": [
+          { "filter": "term", "field": "closed", "value": true },
+          { "filter": "term", "field": "archived", "value": true },
+          { "filter": "term", "field": "price_0_or_1", "value": true },
+          { "filter": "term", "field": "price_under05_or_over95", "value": true }
+        ],
+        "select_fields": ["question", "liquidity_num", "volume_24hr", "one_day_price_change", "one_day_price_change_abs", "one_week_price_change_abs", "last_trade_price", "spread", "tags", "outcome_prices"]
+      }
+    },
+    "features": {
+      "endpoint": "/v3/studio/features/v1",
+      "config": {
+        "features": ["topic_score", "user_affinity_score"]
+      }
+    },
+    "scoring": {
+      "endpoint": "/v3/studio/scoring/ranking_model/polymarket-rerank-v1",
+      "config": {}
+    },
+    "ranking": {
+      "endpoint": "/v3/studio/ranking/feed",
+      "config": {
+        "sort": {
+          "method": "mix",
+          "fields": [
+            { "field": "topic_score", "percentage": 0.3 },
+            { "field": "user_affinity_score", "percentage": 0.3 },
+            { "field": "rerank_score", "percentage": 0.4 }
+          ]
+        },
+        "diversity": {
+          "method": "semantic",
+          "lambda": 0.4
+        },
+        "limits_by_field": {
+          "field": "ai_labels_med",
+          "max": 2,
+          "window": 8
+        }
+      }
+    }
+  },
+  "algo_dsl_code": "// Algo runtime provides: mbd (StudioV1), polymarketWallet (string)\nmbd.forUser('polymarket-wallets', polymarketWallet);\n\n// 1. Search: Markets with biggest price swings + real liquidity\nconst searchResults = await mbd.search()\n  .index('polymarket-items')\n  .size(150)\n  .includeVectors(true)\n  .include()\n    .numeric('liquidity_num', '>=', 15000)\n    .numeric('volume_24hr', '>=', 5000)\n  .exclude()\n    .term('closed', true)\n    .term('archived', true)\n    .term('price_0_or_1', true)\n    .term('price_under05_or_over95', true)\n  .sortBy('one_day_price_change_abs', 'desc')\n  .execute();\n\nmbd.addCandidates(searchResults);\nmbd.log('Found ' + searchResults.length + ' volatile market candidates');\n\n// 2. Features: Enrich with user-item signals\nconst featuresResult = await mbd.features('v1').execute();\nmbd.addFeatures(featuresResult);\n\n// 3. Scoring: ML reranking\nconst scoringResult = await mbd.scoring()\n  .model('/scoring/ranking_model/polymarket-rerank-v1')\n  .execute();\nmbd.addScores(scoringResult, 'rerank_score');\n\n// 4. Ranking: Favor rerank score (captures volatility signal) + diversity\nconst rankingResult = await mbd.ranking()\n  .sortingMethod('mix')\n  .mix('topic_score', 'desc', 0.3)\n  .mix('user_affinity_score', 'desc', 0.3)\n  .mix('rerank_score', 'desc', 0.4)\n  .diversity('semantic')\n  .lambda(0.4)\n  .limitByField()\n  .every(8)\n  .limit('ai_labels_med', 2)\n  .execute();\nmbd.addRanking(rankingResult);\n\nmbd.show(mbd.getFeed());",
+  "curl_example": "curl -X POST https://api.mbd.xyz/v3/studio/search/filter_and_sort \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer mbd-YOUR_API_KEY\" \\\n  -d '{\n    \"index\": \"polymarket-items\",\n    \"size\": 150,\n    \"sort_by\": { \"field\": \"one_day_price_change_abs\", \"order\": \"desc\" },\n    \"include\": [\n      { \"filter\": \"numeric\", \"field\": \"liquidity_num\", \"operator\": \">=\", \"value\": 15000 },\n      { \"filter\": \"numeric\", \"field\": \"volume_24hr\", \"operator\": \">=\", \"value\": 5000 }\n    ],\n    \"exclude\": [\n      { \"filter\": \"term\", \"field\": \"closed\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"archived\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"price_0_or_1\", \"value\": true },\n      { \"filter\": \"term\", \"field\": \"price_under05_or_over95\", \"value\": true }\n    ],\n    \"select_fields\": [\"question\", \"liquidity_num\", \"volume_24hr\", \"one_day_price_change\", \"one_day_price_change_abs\", \"last_trade_price\", \"spread\", \"tags\"]\n  }'",
+  "customization_hints": [
+    "Switch sort_by to 'one_week_price_change_abs' to catch slower-moving but significant shifts",
+    "Lower liquidity_num threshold (e.g. 10000) to include smaller but still-active markets",
+    "Remove price_under05_or_over95 exclusion if you want to include long-shot markets that are spiking",
+    "Decrease diversity lambda toward 0.2 for maximum topic spread, or increase toward 0.7 to cluster similar volatile markets",
+    "Add a numeric filter on 'span_days' >= 7 to exclude short-lived micro-markets"
+  ],
+  "docs_link": "https://docs.getembed.ai/docs/search",
+  "tags": ["polymarket", "prediction-markets", "volatile", "price-movement", "trading"]
+}
